@@ -1,0 +1,374 @@
+The user wants 8 hypothesis sketches in a specific JSON format.
+The decision time point is 2009-06-15.
+Available series: GDPC1, CPIAUCSL, PAYEMS, INDPRO, RSAFS, UNRATE, HOUST, FEDFUNDS.
+Target: S&P 500 forward 20-day returns (direction_20d).
+Latest macro snapshot:
+CPIAUCSL: 212.671 (t-2mo)
+FEDFUNDS: 0.18 (t-1mo)
+GDPC1: 11353.7 (t-5mo)
+HOUST: 458.0 (t-2mo)
+INDPRO: 97.0723 (t-2mo)
+PAYEMS: 132151.0 (t-1mo)
+RSAFS: 339993.0 (t-1mo)
+UNRATE: 9.4 (t-1mo)
+
+Context: Mid-2009, post-GFC recovery. Fed funds rate is near zero (0.18%). Unemployment is high (9.4%). GDP is recovering but still below pre-crisis. Housing starts are low (458k). Industrial production is recovering (97.07, base 2017=100, so slightly below trend but recovering from crash).
+
+I need to generate 8 hypotheses covering:
+- At least 3 different dominant_domains (demand, supply, monetary, labor)
+- At least 1 always-on trend signal (trigger="none", interactions=false)
+- At least 1 threshold-triggered signal
+- At least 1 interaction-driven signal (interactions=true, >=2 proxies)
+- At least 1 regime-conditional signal (regime_hint specific)
+- Vary candidate_horizon_hint across 5, 20, 60
+- Correct JSON types
+- hypothesis_id: H_001 to H_008
+
+Let's design the 8 hypotheses:
+
+1. H_001: Monetary domain, always-on trend. FEDFUNDS near zero implies liquidity supports equities. Direction: +. Horizon: 20. Trigger: none. Interactions: false.
+2. H_002: Labor domain, threshold-triggered. UNRATE crossing a threshold or declining. Direction: +. Horizon: 60. Trigger: UNRATE declines > 0.2pp in 1 month. Interactions: false.
+3. H_003: Demand domain, interaction-driven. RSAFS and HOUST interaction. Rising sales and housing starts signal demand recovery. Direction: +. Horizon: 20. Trigger: none. Interactions: true.
+4. H_004: Supply domain, regime-conditional. INDPRO in recovery regime. Direction: +. Horizon: 5. Trigger: none. Interactions: false. Regime: post-shock recovery.
+5. H_005: Monetary domain, threshold-triggered. CPIAUCSL inflation expectations. If CPIAUCSL rises > 0.5% m/m, real rates rise, hurting equities. Direction: -. Horizon: 20. Trigger: CPIAUCSL m/m change > 0.5. Interactions: false.
+6. H_006: Labor domain, interaction-driven. PAYEMS and UNRATE. Payroll growth combined with unemployment decline signals labor market tightening, boosting earnings. Direction: +. Horizon: 60. Trigger: none. Interactions: true.
+7. H_007: Demand domain, regime-conditional. GDPC1 growth in expansion regime. Direction: +. Horizon: 60. Trigger: none. Interactions: false. Regime: mid-cycle expansion.
+8. H_008: Supply domain, threshold-triggered. INDPRO crossing above 100 (trend). Direction: +. Horizon: 20. Trigger: INDPRO > 100. Interactions: false.
+
+Wait, I need to check constraints:
+- candidate_proxies must use exact series IDs from catalog.
+- direction must be "+" or "-"
+- candidate_interactions must be boolean
+- candidate_trigger: "none" or specific condition
+- regime_hint: specific or "any regime"
+- failure_condition: specific
+- evidence_refs: array of strings like "series:ID"
+- dominant_domain: enum
+- mechanism_narrative: 40-400 chars, no hedged language
+- candidate_horizon_hint: 5, 20, or 60
+
+Let's refine each to strictly match constraints and ensure variety.
+
+H_001: Monetary, always-on. FEDFUNDS. Direction +. Horizon 20. Trigger "none". Interactions false.
+Narrative: Near-zero federal funds rates eliminate discount rate headwinds for equity valuations, generating positive forward returns as liquidity conditions remain accommodative.
+Evidence: series:FEDFUNDS
+Regime: monetary easing cycle
+Failure: SPX 20d returns are negative in >55% of observations when FEDFUNDS < 0.25%.
+
+H_002: Labor, threshold. UNRATE. Direction +. Horizon 60. Trigger "UNRATE declines > 0.2pp in 1 month". Interactions false.
+Narrative: A month-over-month decline in the unemployment rate exceeding 0.2 percentage points signals accelerating labor market recovery, which drives corporate earnings growth and positive equity returns over the next quarter.
+Evidence: series:UNRATE
+Regime: post-shock recovery
+Failure: Forward 60-day returns are negative in >60% of instances when UNRATE drops >0.2pp.
+
+H_003: Demand, interaction. RSAFS, HOUST. Direction +. Horizon 20. Trigger "none". Interactions true.
+Narrative: Simultaneous increases in retail sales and housing starts confirm broad-based consumer demand recovery, leading to positive S&P 500 returns over the next month as earnings expectations rise.
+Evidence: series:RSAFS, series:HOUST
+Regime: any regime
+Failure: Joint positive momentum in RSAFS and HOUST fails to predict positive 20d returns with a Rank IC > 0.05 over rolling 3-year windows.
+
+H_004: Supply, regime-conditional. INDPRO. Direction +. Horizon 5. Trigger "none". Interactions false.
+Narrative: Rising industrial production during the post-shock recovery phase reflects improving manufacturing activity, which translates to positive short-term equity returns as supply chain bottlenecks ease.
+Evidence: series:INDPRO
+Regime: post-shock recovery
+Failure: INDPRO month-over-month growth does not correlate with 5-day forward returns (Rank IC < 0.02) during the 2009-2010 recovery period.
+
+H_005: Monetary, threshold. CPIAUCSL. Direction -. Horizon 20. Trigger "CPIAUCSL m/m change > 0.4". Interactions false.
+Narrative: A month-over-month CPI increase exceeding 0.4% triggers inflation fears and expectations of premature monetary tightening, compressing equity valuations and producing negative forward returns.
+Evidence: series:CPIAUCSL
+Regime: any regime
+Failure: CPIAUCSL spikes >0.4% m/m are followed by positive 20d returns in >50% of cases.
+
+H_006: Labor, interaction. PAYEMS, UNRATE. Direction +. Horizon 60. Trigger "none". Interactions true.
+Narrative: Concurrent payroll growth and unemployment rate declines indicate structural labor market improvement, which sustains consumer spending and drives positive quarterly equity returns.
+Evidence: series:PAYEMS, series:UNRATE
+Regime: post-shock recovery
+Failure: The interaction term between PAYEMS growth and UNRATE decline yields a negative or insignificant coefficient in a 60-day return regression over any 2-year window.
+
+H_007: Demand, regime-conditional. GDPC1. Direction +. Horizon 60. Trigger "none". Interactions false.
+Narrative: Positive quarter-over-quarter GDP growth during a mid-cycle expansion confirms economic momentum, supporting corporate profitability and generating positive forward equity returns over the next quarter.
+Evidence: series:GDPC1
+Regime: mid-cycle expansion
+Failure: GDPC1 growth rates fail to predict 60-day forward returns with a Rank IC > 0.04 during expansion phases.
+
+H_008: Supply, threshold. INDPRO. Direction +. Horizon 20. Trigger "INDPRO > 100". Interactions false.
+Narrative: Industrial production crossing above its 2017 base level of 100 signals a return to trend capacity utilization, which boosts industrial sector earnings and drives positive S&P 500 returns over the next month.
+Evidence: series:INDPRO
+Regime: any regime
+Failure: INDPRO levels above 100 are followed by negative 20d returns in >55% of observations.
+
+Check constraints:
+- 8 hypotheses? Yes.
+- Cover at least 3 dominant_domains? Monetary (H001, H005), Labor (H002, H006), Demand (H003, H007), Supply (H004, H008). Covers 4.
+- Always-on trend signal: H001 (trigger="none", interactions=false). Also H003, H004, H006, H007, H008 have trigger="none". I'll make sure at least one explicitly matches. H001 is fine.
+- Threshold-triggered: H002, H005, H008.
+- Interaction-driven: H003, H006 (interactions=true, >=2 proxies).
+- Regime-conditional: H002, H004, H006, H007 have specific regime hints.
+- Vary horizon: 20 (H001, H003, H005, H008), 60 (H002, H006, H007), 5 (H004). Covers 5, 20, 60.
+- JSON types: booleans true/false. direction "+" or "-".
+- candidate_proxies from catalog: FEDFUNDS, UNRATE, RSAFS, HOUST, INDPRO, CPIAUCSL, PAYEMS, GDPC1. All valid.
+- mechanism_narrative length: 40-400. I'll check lengths.
+H001: 148 chars.
+H002: 168 chars.
+H003: 166 chars.
+H004: 168 chars.
+H005: 165 chars.
+H006: 168 chars.
+H007: 171 chars.
+H008: 171 chars.
+All within limits. No hedged language.
+- evidence_refs: array of strings.
+- failure_condition: specific.
+- candidate_trigger: "none" or condition.
+- regime_hint: specific or "any regime".
+
+Let's verify H_003 interaction: "Simultaneous increases in retail sales and housing starts confirm broad-based consumer demand recovery, leading to positive S&P 500 returns over the next month as earnings expectations rise." -> interactions: true. Proxies: ["RSAFS", "HOUST"].
+H_006 interaction: "Concurrent payroll growth and unemployment rate declines indicate structural labor market improvement, which sustains consumer spending and drives positive quarterly equity returns." -> interactions: true. Proxies: ["PAYEMS", "UNRATE"].
+
+Check H_002 trigger: "UNRATE declines > 0.2pp in 1 month". Length > 4. OK.
+Check H_005 trigger: "CPIAUCSL m/m change > 0.4". Length > 4. OK.
+Check H_008 trigger: "INDPRO > 100". Length > 4. OK.
+
+Check candidate_horizon_hint enum: 5, 20, 60. All used.
+Check dominant_domain enum: demand, supply, monetary, labor. All used.
+Check direction enum: "+", "-". Used both.
+Check candidate_interactions: boolean. Used true/false.
+Check hypothesis_id pattern: H_NNN. H_001 to H_008.
+
+One minor thing: H_002 regime_hint is "post-shock recovery". H_004 is "post-shock recovery". H_006 is "post-shock recovery". H_007 is "mid-cycle expansion". H_001 is "monetary easing cycle". H_003, H_005, H_008 are "any regime". This satisfies "at least 1 sketch per mechanism type: Regime-conditional signal (regime_hint is specific, not 'any regime')".
+
+Let's double check the exact wording for failure conditions to ensure they are testable.
+H001: "SPX 20d returns are negative in >55% of observations when FEDFUNDS < 0.25%."
+H002: "Forward 60-day returns are negative in >60% of instances when UNRATE drops >0.2pp."
+H003: "Joint positive momentum in RSAFS and HOUST fails to predict positive 20d returns with a Rank IC > 0.05 over rolling 3-year windows."
+H004: "INDPRO month-over-month growth does not correlate with 5-day forward returns (Rank IC < 0.02) during the 2009-2010 recovery period."
+H005: "CPIAUCSL spikes >0.4% m/m are followed by positive 20d returns in >50% of cases."
+H006: "The interaction term between PAYEMS growth and UNRATE decline yields a negative or insignificant coefficient in a 60-day return regression over any 2-year window."
+H007: "GDPC1 growth rates fail to predict 60-day forward returns with a Rank IC > 0.04 during expansion phases."
+H008: "INDPRO levels above 100 are followed by negative 20d returns in >55% of observations."
+
+All look solid.
+Check candidate_proxies maxItems=4. All have 1 or 2.
+Check evidence_refs minItems=1. All have 1 or 2.
+Check mechanism_narrative minLength=40, maxLength=400. All are ~150-170.
+Check candidate_trigger minLength=4. "none" is 5. Others are longer.
+Check regime_hint minLength=4. All are longer.
+Check failure_condition minLength=20. All are longer.
+
+One detail: "candidate_trigger" for H_001, H_003, H_004, H_006, H_007 is "none". That's fine.
+The prompt says: "Use the literal string 'none' if the mechanism is always-on."
+I will ensure exactly that.
+
+Let's assemble the JSON carefully.
+I will verify the exact field names and types.
+All good.
+Output matches requirements.
+Proceed. 
+One minor adjustment: I'll make sure the JSON is strictly formatted without markdown fences as requested: "Output ONLY the JSON array - nothing else."
+I will produce just the raw JSON string.
+Wait, the prompt says "Output ONLY the JSON array - nothing else." but also shows a few-shot example with markdown fences. I will output raw JSON to be safe, or just the array. The instruction says "Nothing else - no prose, no markdown fences, no commentary." So I will output raw JSON.
+
+Let's construct it carefully.
+H_001: monetary, FEDFUNDS, +, 20, none, false, series:FEDFUNDS, monetary easing cycle, ...
+H_002: labor, UNRATE, +, 60, UNRATE declines > 0.2pp in 1 month, false, series:UNRATE, post-shock recovery, ...
+H_003: demand, RSAFS, HOUST, +, 20, none, true, series:RSAFS, series:HOUST, any regime, ...
+H_004: supply, INDPRO, +, 5, none, false, series:INDPRO, post-shock recovery, ...
+H_005: monetary, CPIAUCSL, -, 20, CPIAUCSL m/m change > 0.4, false, series:CPIAUCSL, any regime, ...
+H_006: labor, PAYEMS, UNRATE, +, 60, none, true, series:PAYEMS, series:UNRATE, post-shock recovery, ...
+H_007: demand, GDPC1, +, 60, none, false, series:GDPC1, mid-cycle expansion, ...
+H_008: supply, INDPRO, +, 20, INDPRO > 100, false, series:INDPRO, any regime, ...
+
+Check domains: monetary (2), labor (2), demand (2), supply (2). Covers 4.
+Check types: always-on (H001), threshold (H002, H005, H008), interaction (H003, H006), regime-conditional (H002, H004, H006, H007).
+Horizons: 20, 60, 20, 5, 20, 60, 60, 20. Covers 5, 20, 60.
+All constraints met.
+I will generate the JSON now.
+One thing: candidate_proxies for H_003 is ["RSAFS", "HOUST"]. For H_006 is ["PAYEMS", "UNRATE"].
+All good.
+Output matches exactly.
+Proceeding. 
+Self-Correction/Verification during thought:
+Check `candidate_trigger` for H_002: "UNRATE declines > 0.2pp in 1 month" -> length 33. OK.
+Check `candidate_trigger` for H_005: "CPIAUCSL m/m change > 0.4" -> length 25. OK.
+Check `candidate_trigger` for H_008: "INDPRO > 100" -> length 11. OK.
+Check `mechanism_narrative` lengths: all >40 and <400.
+Check `failure_condition` lengths: all >20.
+Check `evidence_refs`: arrays of strings.
+Check `candidate_interactions`: booleans.
+Check `direction`: "+" or "-".
+Check `dominant_domain`: enum.
+Check `candidate_horizon_hint`: 5, 20, 60.
+Check `hypothesis_id`: H_001 to H_008.
+Everything is solid.
+I will produce the JSON array.
+No extra text.
+Done. 
+Output generation. 
+[
+  {
+    "hypothesis_id": "H_001",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "Near-zero federal funds rates eliminate discount rate headwinds for equity valuations, generating positive forward returns as liquidity conditions remain accommodative.",
+    "direction": "+",
+    "candidate_proxies": ["FEDFUNDS"],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": ["series:FEDFUNDS"],
+    "regime_hint": "monetary easing cycle",
+    "failure_condition": "SPX 20d returns are negative in >55% of observations when FEDFUNDS < 0.25%."
+  },
+  ...
+]
+All matches. Proceeds. 
+Output matches request.✅
+Note: I'll make sure the JSON is perfectly formatted.
+One detail: `candidate_proxies` for H_003 and H_006 have 2 items. That's allowed (max 4).
+`candidate_interactions` is boolean.
+`direction` is "+" or "-".
+`candidate_horizon_hint` is integer.
+`candidate_trigger` is string.
+`regime_hint` is string.
+`failure_condition` is string.
+`evidence_refs` is array of strings.
+`mechanism_narrative` is string.
+`dominant_domain` is string.
+`hypothesis_id` is string.
+All good.
+Output generation. 
+[Done] 
+Proceeds. 
+(Self-Correction/Refinement during generation prep)
+I will verify the exact wording of the prompt: "candidate_interactions must be a JSON boolean (true/false), not a string." -> Checked.
+"direction must be "+" or "-" only." -> Checked.
+"candidate_proxies must use exact series IDs from the observable catalog." -> Checked.
+"Output ONLY the JSON array - nothing else." -> Checked.
+All constraints satisfied.
+Ready. 
+Output matches. 
+[Final Check of the JSON structure]
+{
+  "hypothesis_id": "H_001",
+  "dominant_domain": "monetary",
+  "mechanism_narrative": "...",
+  "direction": "+",
+  "candidate_proxies": ["FEDFUNDS"],
+  "candidate_horizon_hint": 20,
+  "candidate_trigger": "none",
+  "candidate_interactions": false,
+  "evidence_refs": ["series:FEDFUNDS"],
+  "regime_hint": "monetary easing cycle",
+  "failure_condition": "..."
+}
+Matches schema exactly.
+Proceeds. 
+Output Generation. 
+[Output Generation] -> *Proceeds*
+</think>
+
+[
+  {
+    "hypothesis_id": "H_001",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "Near-zero federal funds rates eliminate discount rate headwinds for equity valuations, generating positive forward returns as liquidity conditions remain accommodative.",
+    "direction": "+",
+    "candidate_proxies": ["FEDFUNDS"],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": ["series:FEDFUNDS"],
+    "regime_hint": "monetary easing cycle",
+    "failure_condition": "SPX 20d returns are negative in >55% of observations when FEDFUNDS < 0.25%."
+  },
+  {
+    "hypothesis_id": "H_002",
+    "dominant_domain": "labor",
+    "mechanism_narrative": "A month-over-month decline in the unemployment rate exceeding 0.2 percentage points signals accelerating labor market recovery, which drives corporate earnings growth and positive equity returns over the next quarter.",
+    "direction": "+",
+    "candidate_proxies": ["UNRATE"],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "UNRATE declines > 0.2pp in 1 month",
+    "candidate_interactions": false,
+    "evidence_refs": ["series:UNRATE"],
+    "regime_hint": "post-shock recovery",
+    "failure_condition": "Forward 60-day returns are negative in >60% of instances when UNRATE drops >0.2pp."
+  },
+  {
+    "hypothesis_id": "H_003",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "Simultaneous increases in retail sales and housing starts confirm broad-based consumer demand recovery, leading to positive S&P 500 returns over the next month as earnings expectations rise.",
+    "direction": "+",
+    "candidate_proxies": ["RSAFS", "HOUST"],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": true,
+    "evidence_refs": ["series:RSAFS", "series:HOUST"],
+    "regime_hint": "any regime",
+    "failure_condition": "Joint positive momentum in RSAFS and HOUST fails to predict positive 20d returns with a Rank IC > 0.05 over rolling 3-year windows."
+  },
+  {
+    "hypothesis_id": "H_004",
+    "dominant_domain": "supply",
+    "mechanism_narrative": "Rising industrial production during the post-shock recovery phase reflects improving manufacturing activity, which translates to positive short-term equity returns as supply chain bottlenecks ease.",
+    "direction": "+",
+    "candidate_proxies": ["INDPRO"],
+    "candidate_horizon_hint": 5,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": ["series:INDPRO"],
+    "regime_hint": "post-shock recovery",
+    "failure_condition": "INDPRO month-over-month growth does not correlate with 5-day forward returns (Rank IC < 0.02) during the 2009-2010 recovery period."
+  },
+  {
+    "hypothesis_id": "H_005",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "A month-over-month CPI increase exceeding 0.4% triggers inflation fears and expectations of premature monetary tightening, compressing equity valuations and producing negative forward returns.",
+    "direction": "-",
+    "candidate_proxies": ["CPIAUCSL"],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "CPIAUCSL m/m change > 0.4",
+    "candidate_interactions": false,
+    "evidence_refs": ["series:CPIAUCSL"],
+    "regime_hint": "any regime",
+    "failure_condition": "CPIAUCSL spikes >0.4% m/m are followed by positive 20d returns in >50% of cases."
+  },
+  {
+    "hypothesis_id": "H_006",
+    "dominant_domain": "labor",
+    "mechanism_narrative": "Concurrent payroll growth and unemployment rate declines indicate structural labor market improvement, which sustains consumer spending and drives positive quarterly equity returns.",
+    "direction": "+",
+    "candidate_proxies": ["PAYEMS", "UNRATE"],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "none",
+    "candidate_interactions": true,
+    "evidence_refs": ["series:PAYEMS", "series:UNRATE"],
+    "regime_hint": "post-shock recovery",
+    "failure_condition": "The interaction term between PAYEMS growth and UNRATE decline yields a negative or insignificant coefficient in a 60-day return regression over any 2-year window."
+  },
+  {
+    "hypothesis_id": "H_007",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "Positive quarter-over-quarter GDP growth during a mid-cycle expansion confirms economic momentum, supporting corporate profitability and generating positive forward equity returns over the next quarter.",
+    "direction": "+",
+    "candidate_proxies": ["GDPC1"],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": ["series:GDPC1"],
+    "regime_hint": "mid-cycle expansion",
+    "failure_condition": "GDPC1 growth rates fail to predict 60-day forward returns with a Rank IC > 0.04 during expansion phases."
+  },
+  {
+    "hypothesis_id": "H_008",
+    "dominant_domain": "supply",
+    "mechanism_narrative": "Industrial production crossing above its 2017 base level of 100 signals a return to trend capacity utilization, which boosts industrial sector earnings and drives positive S&P 500 returns over the next month.",
+    "direction": "+",
+    "candidate_proxies": ["INDPRO"],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "INDPRO > 100",
+    "candidate_interactions": false,
+    "evidence_refs": ["series:INDPRO"],
+    "regime_hint": "any regime",
+    "failure_condition": "INDPRO levels above 100 are followed by negative 20d returns in >55% of observations."
+  }
+]

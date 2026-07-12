@@ -1,0 +1,430 @@
+Here's a thinking process:
+
+1.  **Analyze User Input:**
+   - **Role:** Macro-financial researcher
+   - **Task:** Generate 8 hypothesis sketches as a JSON array explaining how macro signals drive S&P 500 forward returns.
+   - **Decision Time:** 2020-11-15 (only info up to this date is admissible)
+   - **Observable Catalog:** GDPC1, CPIAUCSL, PAYEMS, INDPRO, RSAFS, UNRATE, HOUST, FEDFUNDS
+   - **Target:** S&P 500 forward 20-day returns (direction_20d)
+   - **Latest Macro Snapshot (as of ~Nov 2020):**
+     - CPIAUCSL: 235.74 (t-2mo)
+     - FEDFUNDS: 0.12 (t-1mo)
+     - GDPC1: 16304.8 (t-4mo)
+     - HOUST: 926.0 (t-2mo)
+     - INDPRO: 105.1786 (t-1mo)
+     - PAYEMS: 141367.0 (t-1mo)
+     - RSAFS: 436772.0 (t-1mo)
+     - UNRATE: 5.4 (t-1mo)
+   - **Schema Requirements:** All fields required, specific constraints on types, enums, lengths, etc.
+   - **Constraints:**
+     - Exactly 8 hypotheses (H_001 to H_008)
+     - Cover at least 3 different `dominant_domain` values (demand, supply, monetary, labor)
+     - Include at least 1 of each mechanism type:
+       - Always-on trend signal (`candidate_trigger` = "none", `candidate_interactions` = false)
+       - Threshold-triggered signal (`candidate_trigger` describes a crossing condition)
+       - Interaction-driven signal (`candidate_interactions` = true, >= 2 proxies)
+       - Regime-conditional signal (`regime_hint` is specific)
+     - Vary `candidate_horizon_hint` across 5, 20, 60
+     - Correct JSON types (booleans, etc.)
+     - Output ONLY the JSON array.
+
+2.  **Deconstruct Constraints & Plan Hypotheses:**
+   I need to create 8 distinct hypotheses. Let's map out their properties to ensure all constraints are met.
+
+   *Domains to cover:* monetary, labor, demand, supply (at least 3)
+   *Mechanism types to include:* Always-on, Threshold-triggered, Interaction-driven, Regime-conditional
+   *Horizons:* 5, 20, 60 (vary across the 8)
+   *Proxies:* Must be from the catalog. Max 4 per hypothesis.
+   *Direction:* "+" or "-"
+   *Trigger:* "none" or specific condition
+   *Interactions:* true/false
+   *Regime:* specific or "any regime"
+   *Failure condition:* specific, testable
+   *Evidence refs:* at least 1, format "series:<ID>"
+
+   Let's draft 8 hypotheses systematically:
+
+   **H_001:** Monetary domain, Always-on trend, Horizon 20
+   - Proxies: FEDFUNDS
+   - Direction: +
+   - Trigger: none
+   - Interactions: false
+   - Regime: any regime
+   - Narrative: Declining federal funds rates reduce discount rates for equity valuations, driving positive forward returns.
+   - Evidence: series:FEDFUNDS
+   - Failure: Rank IC < 0.02 over 3-year rolling window.
+
+   **H_002:** Labor domain, Threshold-triggered, Horizon 20
+   - Proxies: UNRATE
+   - Direction: -
+   - Trigger: UNRATE rises > 0.5pp month-over-month
+   - Interactions: false
+   - Regime: any regime
+   - Narrative: A sharp monthly increase in the unemployment rate signals deteriorating labor market conditions and reduced consumer spending capacity, leading to negative equity returns.
+   - Evidence: series:UNRATE
+   - Failure: Positive 20d returns occur in >55% of triggered instances.
+
+   **H_003:** Demand domain, Interaction-driven, Horizon 60
+   - Proxies: RSAFS, HOUST
+   - Direction: +
+   - Trigger: none
+   - Interactions: true
+   - Regime: post-shock recovery
+   - Narrative: Simultaneous expansion in retail sales and housing starts indicates synchronized consumer demand recovery, supporting corporate earnings and generating positive quarterly equity returns.
+   - Evidence: series:RSAFS, series:HOUST
+   - Failure: Joint positive growth in RSAFS and HOUST fails to produce positive 60d returns in >60% of cases.
+
+   **H_004:** Supply domain, Regime-conditional, Horizon 5
+   - Proxies: INDPRO
+   - Direction: +
+   - Trigger: none
+   - Interactions: false
+   - Regime: post-shock recovery
+   - Narrative: Rapid month-over-month growth in industrial production during economic recovery phases signals supply chain normalization and capacity utilization improvements, driving short-term positive market momentum.
+   - Evidence: series:INDPRO
+   - Failure: INDPRO growth > 1% MoM yields negative 5d returns in >50% of recovery-phase observations.
+
+   **H_005:** Monetary domain, Threshold-triggered, Horizon 20
+   - Proxies: CPIAUCSL, FEDFUNDS
+   - Direction: -
+   - Trigger: CPIAUCSL MoM change > 0.4% while FEDFUNDS < 0.25%
+   - Interactions: true (wait, constraint says interaction-driven needs candidate_interactions=true. I'll make this interaction-driven or keep it threshold. Let's make it threshold-triggered but single proxy to vary, or keep interactions false. Actually, I need at least 1 interaction-driven. H_003 covers it. I'll make H_005 threshold-triggered with single proxy.)
+   Let's adjust H_005 to be threshold-triggered, single proxy, monetary domain.
+   - Proxies: CPIAUCSL
+   - Direction: -
+   - Trigger: CPIAUCSL MoM change > 0.5%
+   - Interactions: false
+   - Regime: any regime
+   - Narrative: Accelerating monthly inflation erodes real corporate margins and prompts expectations of tighter financial conditions, resulting in negative forward equity returns.
+   - Evidence: series:CPIAUCSL
+   - Failure: Inflation spikes > 0.5% MoM are followed by positive 20d returns in >65% of instances.
+
+   **H_006:** Labor domain, Interaction-driven, Horizon 20
+   - Proxies: PAYEMS, UNRATE
+   - Direction: +
+   - Trigger: none
+   - Interactions: true
+   - Regime: any regime
+   - Narrative: Divergence where total nonfarm payrolls increase while the unemployment rate declines confirms broad-based labor market tightening, boosting consumer confidence and driving positive equity returns.
+   - Evidence: series:PAYEMS, series:UNRATE
+   - Failure: The PAYEMS/UNRATE divergence signal yields negative 20d returns in >55% of observations.
+
+   **H_007:** Demand domain, Always-on trend, Horizon 60
+   - Proxies: GDPC1
+   - Direction: +
+   - Trigger: none
+   - Interactions: false
+   - Regime: any regime
+   - Narrative: Quarter-over-quarter growth in real GDP reflects underlying economic expansion that supports corporate revenue growth, generating positive quarterly equity returns.
+   - Evidence: series:GDPC1
+   - Failure: Positive GDP growth quarters are followed by negative 60d returns in >50% of cases.
+
+   **H_008:** Supply domain, Regime-conditional, Horizon 20
+   - Proxies: INDPRO, RSAFS
+   - Direction: -
+   - Trigger: none
+   - Interactions: true
+   - Regime: late-cycle expansion
+   - Narrative: Industrial production growth outpacing retail sales growth during late-cycle expansions signals inventory accumulation and weakening demand absorption, leading to negative equity returns.
+   - Evidence: series:INDPRO, series:RSAFS
+   - Failure: INDPRO growth exceeding RSAFS growth yields positive 20d returns in >60% of late-cycle observations.
+
+   Let's verify constraints:
+   - Exactly 8? Yes.
+   - IDs H_001 to H_008? Yes.
+   - Cover at least 3 domains? Monetary (H_001, H_005), Labor (H_002, H_006), Demand (H_003, H_007), Supply (H_004, H_008). Covers 4. Good.
+   - Mechanism types:
+     - Always-on: H_001 (trigger="none", interactions=false), H_007
+     - Threshold-triggered: H_002, H_005
+     - Interaction-driven: H_003 (interactions=true, 2 proxies), H_006, H_008
+     - Regime-conditional: H_003 (post-shock recovery), H_004 (post-shock recovery), H_008 (late-cycle expansion)
+     All covered.
+   - Vary horizons: 5 (H_004), 20 (H_001, H_002, H_005, H_006, H_008), 60 (H_003, H_007). Covered.
+   - JSON types: booleans true/false, directions "+"/"-", arrays, strings. All correct.
+   - Proxies from catalog? Yes.
+   - Evidence refs format? "series:<ID>" used.
+   - Failure conditions specific? Yes.
+   - Narrative length 40-400? I'll check and adjust if needed.
+   - Trigger length >=4? "none" is 4 chars. Others are longer. Good.
+   - Regime hint length >=4? Yes.
+   - Failure condition length >=20? Yes.
+
+   Let's carefully craft each JSON object to strictly match the schema. I will double-check field names and constraints.
+
+   Schema fields:
+   hypothesis_id, dominant_domain, mechanism_narrative, direction, candidate_proxies, candidate_horizon_hint, candidate_trigger, candidate_interactions, evidence_refs, regime_hint, failure_condition.
+
+   Check H_001:
+   - hypothesis_id: "H_001"
+   - dominant_domain: "monetary"
+   - mechanism_narrative: "A sustained decline in the federal funds rate reduces the discount rate applied to future equity cash flows, compressing valuation multiples and driving positive S&P 500 forward returns over the next month." (len ~ 188)
+   - direction: "+"
+   - candidate_proxies: ["FEDFUNDS"]
+   - candidate_horizon_hint: 20
+   - candidate_trigger: "none"
+   - candidate_interactions: false
+   - evidence_refs: ["series:FEDFUNDS"]
+   - regime_hint: "any regime"
+   - failure_condition: "Walk-forward Rank IC remains below 0.02 over any 3-year rolling window, or 20-day forward returns during rate declines are not significantly higher than baseline."
+
+   Check H_002:
+   - hypothesis_id: "H_002"
+   - dominant_domain: "labor"
+   - mechanism_narrative: "A sharp month-over-month increase in the unemployment rate signals deteriorating labor market conditions and reduced household income growth, triggering negative equity returns as earnings expectations are downgraded." (len ~ 208)
+   - direction: "-"
+   - candidate_proxies: ["UNRATE"]
+   - candidate_horizon_hint: 20
+   - candidate_trigger: "UNRATE rises > 0.5pp month-over-month"
+   - candidate_interactions: false
+   - evidence_refs: ["series:UNRATE"]
+   - regime_hint: "any regime"
+   - failure_condition: "Positive 20-day forward returns occur in more than 55% of triggered instances over a 5-year out-of-sample period."
+
+   Check H_003:
+   - hypothesis_id: "H_003"
+   - dominant_domain: "demand"
+   - mechanism_narrative: "Simultaneous month-over-month expansion in retail sales and housing starts indicates synchronized consumer demand recovery, supporting corporate revenue growth and generating positive quarterly equity returns." (len ~ 203)
+   - direction: "+"
+   - candidate_proxies: ["RSAFS", "HOUST"]
+   - candidate_horizon_hint: 60
+   - candidate_trigger: "none"
+   - candidate_interactions: true
+   - evidence_refs: ["series:RSAFS", "series:HOUST"]
+   - regime_hint: "post-shock recovery"
+   - failure_condition: "Joint positive growth in RSAFS and HOUST fails to produce positive 60-day returns in more than 60% of recovery-phase observations."
+
+   Check H_004:
+   - hypothesis_id: "H_004"
+   - dominant_domain: "supply"
+   - mechanism_narrative: "Rapid month-over-month growth in industrial production during economic recovery phases signals supply chain normalization and capacity utilization improvements, driving short-term positive market momentum." (len ~ 198)
+   - direction: "+"
+   - candidate_proxies: ["INDPRO"]
+   - candidate_horizon_hint: 5
+   - candidate_trigger: "none"
+   - candidate_interactions: false
+   - evidence_refs: ["series:INDPRO"]
+   - regime_hint: "post-shock recovery"
+   - failure_condition: "INDPRO growth exceeding 1% month-over-month yields negative 5-day returns in more than 50% of recovery-phase observations."
+
+   Check H_005:
+   - hypothesis_id: "H_005"
+   - dominant_domain: "monetary"
+   - mechanism_narrative: "Accelerating monthly inflation erodes real corporate profit margins and prompts market expectations of tighter financial conditions, resulting in negative forward equity returns over the next month." (len ~ 188)
+   - direction: "-"
+   - candidate_proxies: ["CPIAUCSL"]
+   - candidate_horizon_hint: 20
+   - candidate_trigger: "CPIAUCSL MoM change > 0.5%"
+   - candidate_interactions: false
+   - evidence_refs: ["series:CPIAUCSL"]
+   - regime_hint: "any regime"
+   - failure_condition: "Inflation spikes exceeding 0.5% month-over-month are followed by positive 20-day returns in more than 65% of historical instances."
+
+   Check H_006:
+   - hypothesis_id: "H_006"
+   - dominant_domain: "labor"
+   - mechanism_narrative: "A divergence where total nonfarm payrolls increase while the unemployment rate declines confirms broad-based labor market tightening, boosting consumer confidence and driving positive equity returns." (len ~ 192)
+   - direction: "+"
+   - candidate_proxies: ["PAYEMS", "UNRATE"]
+   - candidate_horizon_hint: 20
+   - candidate_trigger: "none"
+   - candidate_interactions: true
+   - evidence_refs: ["series:PAYEMS", "series:UNRATE"]
+   - regime_hint: "any regime"
+   - failure_condition: "The PAYEMS increase combined with UNRATE decline signal yields negative 20-day returns in more than 55% of observations."
+
+   Check H_007:
+   - hypothesis_id: "H_007"
+   - dominant_domain: "demand"
+   - mechanism_narrative: "Quarter-over-quarter growth in real GDP reflects underlying economic expansion that supports corporate revenue growth and earnings revisions, generating positive quarterly equity returns." (len ~ 178)
+   - direction: "+"
+   - candidate_proxies: ["GDPC1"]
+   - candidate_horizon_hint: 60
+   - candidate_trigger: "none"
+   - candidate_interactions: false
+   - evidence_refs: ["series:GDPC1"]
+   - regime_hint: "any regime"
+   - failure_condition: "Positive GDP growth quarters are followed by negative 60-day returns in more than 50% of cases over a rolling 10-year window."
+
+   Check H_008:
+   - hypothesis_id: "H_008"
+   - dominant_domain: "supply"
+   - mechanism_narrative: "Industrial production growth outpacing retail sales growth during late-cycle expansions signals inventory accumulation and weakening demand absorption, leading to negative equity returns." (len ~ 176)
+   - direction: "-"
+   - candidate_proxies: ["INDPRO", "RSAFS"]
+   - candidate_horizon_hint: 20
+   - candidate_trigger: "none"
+   - candidate_interactions: true
+   - evidence_refs: ["series:INDPRO", "series:RSAFS"]
+   - regime_hint: "late-cycle expansion"
+   - failure_condition: "INDPRO growth exceeding RSAFS growth yields positive 20-day returns in more than 60% of late-cycle observations."
+
+   All constraints checked:
+   - 8 hypotheses? Yes.
+   - IDs H_001 to H_008? Yes.
+   - Domains: monetary, labor, demand, supply (4 covered, >=3 required)
+   - Mechanism types: Always-on (H_001, H_004, H_007), Threshold (H_002, H_005), Interaction (H_003, H_006, H_008), Regime-conditional (H_003, H_004, H_008) -> All covered.
+   - Horizons: 5, 20, 60 varied.
+   - JSON types correct.
+   - Proxies from catalog.
+   - Evidence refs format correct.
+   - Narrative lengths between 40 and 400.
+   - Trigger lengths >=4.
+   - Regime hint lengths >=4.
+   - Failure condition lengths >=20.
+   - No markdown fences, just raw JSON array.
+
+   One minor check: `candidate_trigger` for H_001, H_003, H_004, H_006, H_007, H_008 is "none". The schema says `minLength: 4`. "none" is exactly 4. That's fine.
+   `candidate_interactions` must be boolean. Checked.
+   `direction` must be "+" or "-". Checked.
+   `candidate_horizon_hint` enum [5, 20, 60]. Checked.
+   `dominant_domain` enum ["demand", "supply", "monetary", "labor"]. Checked.
+   `evidence_refs` minItems 1. Checked.
+   `candidate_proxies` minItems 1, maxItems 4. Checked.
+
+   All looks solid. I will generate the raw JSON array now.
+   I'll double-check the exact formatting to ensure no markdown fences are included as per "Output ONLY the JSON array - nothing else."
+   I will produce exactly the JSON string.
+   One thing: The prompt says "Output ONLY the JSON array - nothing else. Every field in the provided schema is required."
+   I will make sure the JSON is valid and matches exactly.
+   Let's verify narrative lengths quickly:
+   H_001: 188 chars
+   H_002: 208 chars
+   H_003: 203 chars
+   H_004: 198 chars
+   H_005: 188 chars
+   H_006: 192 chars
+   H_007: 178 chars
+   H_008: 176 chars
+   All between 40 and 400. Good.
+   Failure conditions all >20 chars. Good.
+   Regime hints all >4 chars. Good.
+   Triggers all >=4 chars. Good.
+   Proxies all from list. Good.
+   Ready. Output matches request.✅
+   I will generate it now. 
+   Self-Correction/Refinement during thought: 
+   Check `candidate_trigger` constraint: `minLength: 4`. "none" is 4. It's fine.
+   Check `candidate_interactions`: must be boolean. I used `false`/`true`.
+   Check `direction`: "+" or "-". Used correctly.
+   Check `candidate_horizon_hint`: integer enum. Used correctly.
+   Check `evidence_refs`: array of strings. Used correctly.
+   All good.
+   Output matches exactly.✅
+   Proceeds. 
+   Generating JSON. 
+   [Output Generation] -> *Proceeds*
+   *(Self-Correction/Verification during generation prep)*: 
+   I need to make sure the JSON is strictly valid. I'll format it compactly or pretty-printed, both are fine as long as it's valid JSON. I'll pretty-print for readability but ensure no extra text.
+   All constraints met. Output matches request.✅
+   Final check of the prompt: "Output ONLY the JSON array - nothing else. Every field in the provided schema is required."
+   I will output just the JSON array.
+   Done. 
+   [Output Generation] -> *Proceeds*
+</think>
+
+[
+  {
+    "hypothesis_id": "H_001",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "A sustained decline in the federal funds rate reduces the discount rate applied to future equity cash flows, compressing valuation multiples and driving positive S&P 500 forward returns over the next month.",
+    "direction": "+",
+    "candidate_proxies": ["FEDFUNDS"],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": ["series:FEDFUNDS"],
+    "regime_hint": "any regime",
+    "failure_condition": "Walk-forward Rank IC remains below 0.02 over any 3-year rolling window, or 20-day forward returns during rate declines are not significantly higher than baseline."
+  },
+  {
+    "hypothesis_id": "H_002",
+    "dominant_domain": "labor",
+    "mechanism_narrative": "A sharp month-over-month increase in the unemployment rate signals deteriorating labor market conditions and reduced household income growth, triggering negative equity returns as earnings expectations are downgraded.",
+    "direction": "-",
+    "candidate_proxies": ["UNRATE"],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "UNRATE rises > 0.5pp month-over-month",
+    "candidate_interactions": false,
+    "evidence_refs": ["series:UNRATE"],
+    "regime_hint": "any regime",
+    "failure_condition": "Positive 20-day forward returns occur in more than 55% of triggered instances over a 5-year out-of-sample period."
+  },
+  {
+    "hypothesis_id": "H_003",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "Simultaneous month-over-month expansion in retail sales and housing starts indicates synchronized consumer demand recovery, supporting corporate revenue growth and generating positive quarterly equity returns.",
+    "direction": "+",
+    "candidate_proxies": ["RSAFS", "HOUST"],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "none",
+    "candidate_interactions": true,
+    "evidence_refs": ["series:RSAFS", "series:HOUST"],
+    "regime_hint": "post-shock recovery",
+    "failure_condition": "Joint positive growth in RSAFS and HOUST fails to produce positive 60-day returns in more than 60% of recovery-phase observations."
+  },
+  {
+    "hypothesis_id": "H_004",
+    "dominant_domain": "supply",
+    "mechanism_narrative": "Rapid month-over-month growth in industrial production during economic recovery phases signals supply chain normalization and capacity utilization improvements, driving short-term positive market momentum.",
+    "direction": "+",
+    "candidate_proxies": ["INDPRO"],
+    "candidate_horizon_hint": 5,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": ["series:INDPRO"],
+    "regime_hint": "post-shock recovery",
+    "failure_condition": "INDPRO growth exceeding 1% month-over-month yields negative 5-day returns in more than 50% of recovery-phase observations."
+  },
+  {
+    "hypothesis_id": "H_005",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "Accelerating monthly inflation erodes real corporate profit margins and prompts market expectations of tighter financial conditions, resulting in negative forward equity returns over the next month.",
+    "direction": "-",
+    "candidate_proxies": ["CPIAUCSL"],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "CPIAUCSL MoM change > 0.5%",
+    "candidate_interactions": false,
+    "evidence_refs": ["series:CPIAUCSL"],
+    "regime_hint": "any regime",
+    "failure_condition": "Inflation spikes exceeding 0.5% month-over-month are followed by positive 20-day returns in more than 65% of historical instances."
+  },
+  {
+    "hypothesis_id": "H_006",
+    "dominant_domain": "labor",
+    "mechanism_narrative": "A divergence where total nonfarm payrolls increase while the unemployment rate declines confirms broad-based labor market tightening, boosting consumer confidence and driving positive equity returns.",
+    "direction": "+",
+    "candidate_proxies": ["PAYEMS", "UNRATE"],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": true,
+    "evidence_refs": ["series:PAYEMS", "series:UNRATE"],
+    "regime_hint": "any regime",
+    "failure_condition": "The PAYEMS increase combined with UNRATE decline signal yields negative 20-day returns in more than 55% of observations."
+  },
+  {
+    "hypothesis_id": "H_007",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "Quarter-over-quarter growth in real GDP reflects underlying economic expansion that supports corporate revenue growth and earnings revisions, generating positive quarterly equity returns.",
+    "direction": "+",
+    "candidate_proxies": ["GDPC1"],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": ["series:GDPC1"],
+    "regime_hint": "any regime",
+    "failure_condition": "Positive GDP growth quarters are followed by negative 60-day returns in more than 50% of cases over a rolling 10-year window."
+  },
+  {
+    "hypothesis_id": "H_008",
+    "dominant_domain": "supply",
+    "mechanism_narrative": "Industrial production growth outpacing retail sales growth during late-cycle expansions signals inventory accumulation and weakening demand absorption, leading to negative equity returns.",
+    "direction": "-",
+    "candidate_proxies": ["INDPRO", "RSAFS"],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": true,
+    "evidence_refs": ["series:INDPRO", "series:RSAFS"],
+    "regime_hint": "late-cycle expansion",
+    "failure_condition": "INDPRO growth exceeding RSAFS growth yields positive 20-day returns in more than 60% of late-cycle observations."
+  }
+]
