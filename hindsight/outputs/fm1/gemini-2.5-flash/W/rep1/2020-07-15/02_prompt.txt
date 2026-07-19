@@ -1,0 +1,163 @@
+        Decision time point: 2006-01-15 - only information available on or before this date is admissible as evidence.
+
+        ## Observable Catalog (closed vocabulary - proxies MUST come from this list)
+
+        [AVAILABLE_COLUMNS] = [GDPC1, CPIAUCSL, PAYEMS, INDPRO, RSAFS, UNRATE, HOUST, FEDFUNDS]
+
+        Binding rule: candidate_proxies may only copy exact tokens from [AVAILABLE_COLUMNS].
+        If the desired economic proxy is not present, do not invent a replacement name.
+
+        Series ID   | Domain    | Freq      | Unit                          | Rev.Risk
+-------------------------------------------------------------------------------------
+GDPC1       | demand    | quarterly | Billions of Chained 2017 Dollars | high
+CPIAUCSL    | monetary  | monthly   | Index 1982-1984=100            | low
+PAYEMS      | labor     | monthly   | Thousands of Persons           | high
+INDPRO      | supply    | monthly   | Index 2017=100                 | medium
+RSAFS       | demand    | monthly   | Millions of Dollars            | medium
+UNRATE      | labor     | monthly   | Percent                        | low
+HOUST       | demand    | monthly   | Thousands of Units             | medium
+FEDFUNDS    | monetary  | monthly   | Percent per Annum              | low
+
+        ## Target Panel Summary (S&P 500 forward 20-day returns)
+
+          Ticker        : ^GSPC
+  Data mode     : real_data
+  Source        : Yahoo Finance via yfinance
+  Target        : direction_20d = sign(log(Close[t+20 trading days] / Close[t]))
+  Latest macro snapshot used for prompt context:
+    - CPIAUCSL: asof=t-1mo, value=257.214
+    - FEDFUNDS: asof=t-1mo, value=0.08
+    - GDPC1: asof=t-6mo, value=18977.363
+    - HOUST: asof=t-2mo, value=974.0
+    - INDPRO: asof=t-1mo, value=97.4587
+    - PAYEMS: asof=t-1mo, value=137802.0
+    - RSAFS: asof=t-2mo, value=485545.0
+    - UNRATE: asof=t-1mo, value=11.1
+
+        ## Sketch Schema (JSON Schema - all sketches must conform)
+
+        ```json
+        {
+  "required_fields": [
+    "hypothesis_id",
+    "dominant_domain",
+    "mechanism_narrative",
+    "direction",
+    "candidate_proxies",
+    "candidate_horizon_hint",
+    "candidate_trigger",
+    "candidate_interactions",
+    "evidence_refs",
+    "regime_hint",
+    "failure_condition"
+  ],
+  "field_constraints": {
+    "hypothesis_id": {
+      "type": "string",
+      "pattern": "^H_[0-9]{3,}$",
+      "description": "Unique sketch identifier. Format: H_NNN (zero-padded integer). Assigned by the caller; LLM must not invent colliding IDs."
+    },
+    "dominant_domain": {
+      "type": "string",
+      "enum": [
+        "demand",
+        "supply",
+        "monetary",
+        "labor"
+      ],
+      "description": "Primary macro domain this hypothesis belongs to, drawn from the observable_catalog dominant_macro_domain vocabulary. Determines the mechanism-domain cell in the revision-sensitivity heatmap."
+    },
+    "mechanism_narrative": {
+      "type": "string",
+      "minLength": 40,
+      "maxLength": 400,
+      "description": "Plain-language description of the causal or statistical mechanism. Must be falsifiable: it should be possible to state what observable pattern would confirm or refute it. Do not use hedged language ('may', 'might', 'could potentially')."
+    },
+    "direction": {
+      "type": "string",
+      "enum": [
+        "+",
+        "-"
+      ],
+      "description": "Predicted direction of the forward return over the target horizon. '+' means the mechanism predicts positive SPX returns; '-' means negative. Must be unambiguous at compile time."
+    },
+    "candidate_proxies": {
+      "type": "array",
+      "description": "Ordered list of ALFRED series IDs to use as proxy variables. Must be drawn exclusively from the observable_catalog closed vocabulary. Maximum K_proxy=4 entries (budget constraint from operator_closure.yaml).",
+      "minItems": 1,
+      "maxItems": 4
+    },
+    "candidate_horizon_hint": {
+      "type": "integer",
+      "enum": [
+        5,
+        20,
+        60
+      ],
+      "description": "Suggested prediction horizon in trading days. Corresponds to approximately 1 week (5), 1 month (20), or 1 quarter (60). The instantiation grid in Phase 2 Workflow E will expand this into specific horizon_grid entries."
+    },
+    "candidate_trigger": {
+      "type": "string",
+      "minLength": 4,
+      "description": "Activation condition for the signal. Use the literal string 'none' if the mechanism is always-on. Otherwise describe the threshold or regime condition that must be met before the signal is considered active (e.g., 'UNRATE rises > 0.3pp in 3 months', 'FEDFUNDS > 4.5%'). This field maps to trigger_grid in the compiled hypothesis object."
+    },
+    "candidate_interactions": {
+      "type": "boolean",
+      "description": "True if the mechanism requires the joint behaviour of two or more proxy series (i.e., the signal is not decomposable into independent single-series effects). Setting true triggers interaction_driven family assignment in Workflow B. Max interaction order controlled by K_int=2 in operator_closure.yaml."
+    },
+    "evidence_refs": {
+      "type": "array",
+      "description": "References to supporting evidence. Each entry should identify a data series, document, or empirical observation visible at the decision time point. Format: 'series:<ID>', 'doc:<slug>', or 'fact:<description>'. Minimum 1 entry required.",
+      "minItems": 1
+    },
+    "regime_hint": {
+      "type": "string",
+      "minLength": 4,
+      "description": "Description of the macro regime in which this mechanism is expected to be active or most powerful. Used in Phase 2 Workflow B to assign regime_conditional family when the mechanism's direction flips across regimes. Examples: 'monetary tightening cycle', 'late-cycle expansion', 'post-shock recovery', 'any regime'."
+    },
+    "failure_condition": {
+      "type": "string",
+      "minLength": 20,
+      "description": "Explicit falsification condition: what observable pattern or data outcome would cause this hypothesis to be rejected. Must be specific enough to be testable in Phase 3 walk-forward falsification. Examples: 'SPX produces positive 20d returns in > 60% of triggered instances despite negative signal', 'Rank IC < 0.03 over any 3-year rolling window'."
+    }
+  }
+}
+        ```
+
+        ## Task
+
+        Generate exactly 8 hypothesis sketches as a JSON array.
+        Assign hypothesis_id values as H_001, H_002, ..., H_008.
+
+        Requirements:
+        - Cover at least 3 different dominant_domains across the 8 sketches.
+        - Include at least 1 sketch per mechanism type:
+            * Always-on trend signal (candidate_trigger = "none", candidate_interactions = false)
+            * Threshold-triggered signal (candidate_trigger describes a crossing condition)
+            * Interaction-driven signal (candidate_interactions = true, >= 2 proxies)
+            * Regime-conditional signal (regime_hint is specific, not "any regime")
+        - Vary candidate_horizon_hint across 5, 20, and 60.
+        - Use correct JSON types: booleans must be true/false (not "true"/"false").
+
+        Output ONLY the JSON array - nothing else.
+
+        ## Few-shot Example (do NOT copy H_000 - it is a format reference only)
+
+        The sketch below illustrates a correctly formatted output. Your sketches must use
+        H_001, H_002, ... (not H_000). Every field shown must be present and correctly typed.
+
+        [
+          {
+            "hypothesis_id": "H_000",
+            "dominant_domain": "monetary",
+            "mechanism_narrative": "A sustained 3-month decline in the federal funds rate signals an easing monetary cycle that compresses discount rates applied to equity cash flows, producing positive S&P 500 forward returns over the next 20 trading days.",
+            "direction": "+",
+            "candidate_proxies": ["FEDFUNDS"],
+            "candidate_horizon_hint": 20,
+            "candidate_trigger": "none",
+            "candidate_interactions": false,
+            "evidence_refs": ["series:FEDFUNDS"],
+            "regime_hint": "monetary easing cycle",
+            "failure_condition": "Walk-forward Rank IC remains below 0.03 over any 2-year rolling window, or 20-day forward returns in easing periods are not significantly higher than baseline (t-test p > 0.05)."
+          }
+        ]
