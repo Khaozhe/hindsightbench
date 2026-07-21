@@ -102,7 +102,7 @@ def main() -> None:
     p1 = share(post_only(arms["D"])) - share(post_only(arms["M"]))
 
     # REC (recovery probe, pre vs post); file absent = probe not run for this
-    # row (e.g. qwen3-30b-a3b, collected under BM-2b Stage 1) -> columns "-"
+    # row -> columns "-"
     rec_f = root / "date_probe_results.jsonl"
     rows = [json.loads(l) for l in rec_f.read_text().splitlines() if l.strip()] \
         if rec_f.exists() else []

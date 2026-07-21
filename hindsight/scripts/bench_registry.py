@@ -42,7 +42,11 @@ def _row(key, tex, gen, gen_md=None, name_sup=None, p1="calendar", rec="probe",
 
 # Benchmark-table order (by training generation, frozen presentation order).
 MODELS = [
-    _row("gpt-5.5", "GPT-5.5", 2026, p1="model_relative", delta_gate="weakid",
+    # delta_gate 2026-07-21: "weakid" -> "lowvar". The frozen 07-03 row predated
+    # the 07-07 variance gate; regeneration under the gated pipeline voids delta
+    # (var(LAP)==0 exactly on the 152-date estimation sample — the one sub-1.0
+    # LAP month is excluded by net==0, so the interaction is perfectly collinear).
+    _row("gpt-5.5", "GPT-5.5", 2026, p1="model_relative", delta_gate="lowvar",
          fig4_claim="2025-12", fig5=_D(panel="api", slot=4, label="GPT-5.5")),
     _row("claude-sonnet-5", "Claude Sonnet 5", 2026, p1="model_relative",
          delta_gate="lowvar", valid_sup=("◊◊", "p"),

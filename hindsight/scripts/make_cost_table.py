@@ -63,6 +63,15 @@ ATTRIBUTION = [
      "legacy smoke (row excluded)", 8),
     ("openai_compat", "gpt-5-mini", "2026-07-03T00:00", "2026-07-04T00:00",
      "legacy smoke (row excluded)", 7),
+    # BM-1c LAP sensitivity study (2026-07-21): 3 arms x 258 dates x 20 reps
+    # per model = 15,480 calls each, incl. the 132-call smoke gate. Anthropic
+    # rows also carry tag "lap_sens".
+    ("openai_compat", "gpt-5.4-mini", "2026-07-21T00:00", "2026-07-22T00:00",
+     "BM-1c LAP sensitivity: gpt-5.4-mini (ext t1.0 + t0.3 + t0.7)", 15480),
+    ("openai_compat", "deepseek-v4-flash", "2026-07-21T00:00", "2026-07-22T00:00",
+     "BM-1c LAP sensitivity: deepseek-v4-flash (ext t1.0 + t0.3 + t0.7)", 15480),
+    ("anthropic", "claude-haiku-4-5", "2026-07-21T00:00", "2026-07-22T00:00",
+     "BM-1c LAP sensitivity: claude-haiku-4-5 (ext t1.0 + t0.3 + t0.7)", 15480),
 ]
 
 # rows whose spend never touched these ledgers — must appear explicitly so the
@@ -127,6 +136,7 @@ def main() -> None:
     unattributed = {led: 0 for led in loaded}
     seen = {led: [False] * len(loaded[led]) for led in loaded}
     gd2_total = 0.0
+    bm1c_total = 0.0
     for led, model, lo, hi, task, expect in ATTRIBUTION:
         recs = []
         for i, r in enumerate(loaded[led]):
@@ -145,6 +155,8 @@ def main() -> None:
             cell, status = f"${cost:.2f}", "EXACT-RATE"
             if task.startswith("GD-2"):
                 gd2_total += cost
+            if task.startswith("BM-1c"):
+                bm1c_total += cost
         elif p.get("out") is not None:
             cost = to / 1e6 * p["out"]
             cell, status = f"≥${cost:.2f}", "LOWER-BOUND (output-only rate)"
@@ -162,6 +174,11 @@ def main() -> None:
         "",
         f"Cross-check: GD-2 three-model total at frozen rates = "
         f"**${gd2_total:.2f}** (prereg approval envelope $11; quoted ≈$4.8).",
+        "",
+        f"Cross-check: BM-1c LAP sensitivity three-model total at frozen rates = "
+        f"**${bm1c_total:.2f}** (run 2026-07-21, 46,440 calls; prereg addendum "
+        f"sha256 48d4d968 quote ~$3.60; smoke-gate extrapolation $4.48 ≤ $7 gate; "
+        f"hard cap $10; runner cost_accum.json reconciles at $4.6044).",
         "",
         "## Spend not in these ledgers (explicit gaps)",
         "",
