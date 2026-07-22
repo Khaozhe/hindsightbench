@@ -14,7 +14,7 @@ pre-freeze core experiments that seeded the protocol, as noted below).
 
 **Papers.** Protocol/benchmark paper: *HindsightBench: A Black-Box
 Behavioral Audit Protocol for Parametric Hindsight in Time-Indexed LLM
-Decision Tasks* (arXiv, ID pending — link will land here). The companion
+Decision Tasks* (arXiv:2607.18867, https://arxiv.org/abs/2607.18867). The companion
 findings paper is under double-blind review and is not distributed from
 this repository.
 
@@ -84,7 +84,7 @@ version, and give batch runs independent output-budget headroom.
             Parametric Hindsight in Time-Indexed LLM Decision Tasks},
   author = {Jia, Haozhe},
   year   = {2026},
-  note   = {arXiv preprint (ID pending)}
+  note   = {arXiv:2607.18867}
 }
 ```
 
