@@ -19,6 +19,12 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent))
 from analyze_fm1 import all_dates, fake_map, gap, CRISIS, CALM_YEARS
 
+def crisis_episode(d: str) -> str:
+    """Which preregistered crisis episode a CRISIS date belongs to."""
+    y = d[:4]
+    return "GFC" if y in ("2008", "2009") else ("COVID" if y == "2020" else "2022")
+
+
 def boot_diff(f1, f2, crisis, calm, rng, B=10_000):
     c_a, q_a = np.array(crisis), np.array(calm)
     out = np.empty(B)
@@ -80,26 +86,106 @@ def main() -> None:
     def post_only(bd):
         return {d: v for d, v in bd.items() if d >= "2025-02"}
 
-    # E2 (pre-cutoff)
+    # E2 (pre-cutoff), on the dates BOTH arms actually cover.
+    #
+    # E2 differences two arms. If D and M are scored over different date sets,
+    # the contrast mixes the arm effect with the date composition -- the same
+    # sample-mismatch defect that made E1 wrong on gemini-2.5-pro. Intersecting
+    # is a strict no-op wherever both arms cover the preregistered windows,
+    # which is 14 of the 15 rows (verified: bit-identical estimates and CIs).
     D_pre, M_pre = pre_only(arms["D"]), pre_only(arms["M"])
-    g_d, g_m = gap(D_pre, CRISIS, calm), gap(M_pre, CRISIS, calm)
+    shared = {d for d in D_pre if d in M_pre and D_pre[d] and M_pre[d]}
+    crisis_s = [d for d in CRISIS if d in shared]
+    calm_s = [d for d in calm if d in shared]
+    g_d, g_m = gap(D_pre, crisis_s, calm_s), gap(M_pre, crisis_s, calm_s)
     e2 = g_d - g_m
-    e2_ci = boot_diff(lambda c, q: gap(D_pre, c, q), lambda c, q: gap(M_pre, c, q), CRISIS, calm, rng)
+    e2_ci = boot_diff(lambda c, q: gap(D_pre, c, q), lambda c, q: gap(M_pre, c, q),
+                      crisis_s, calm_s, rng)
 
-    # E3 (pre-cutoff W transplant)
+    # Identification gate: ATTRITION SELECTION, not episode count.
+    #
+    # An earlier version of this gate fired on "shared crisis window spans
+    # fewer than two preregistered episodes" and grounded that in E.1. That
+    # rationale was wrong and self-contradictory: E.1's own per-episode column
+    # reports single-episode E2 fits as confirming evidence (COVID on 2 crisis
+    # dates, fewer than the cell this gate suppresses), and the main text cites
+    # them. Deliberately restricting a window on COMPLETE data is a subgroup
+    # analysis and is fine; it is not what goes wrong here.
+    #
+    # What goes wrong here is that the data chose which dates survive. Under
+    # partial schema compliance each arm loses a different set of dates, so the
+    # surviving intersection is selected -- and on llama3.2:3b it is selected
+    # on the outcome: D's bearish rate is .542 on the shared crisis dates vs
+    # .333 on the ones only D kept, while M's is .125 shared vs .375 M-only;
+    # both arms' calm rates are flat (.333/.338 and .403/.396). The intersection
+    # is exactly where the gap is widest, which is why the estimate moves
+    # +25.2pp -> +48.6pp with the window. Neither window is trustworthy.
+    #
+    # The rule is therefore coverage completeness, with no tuned threshold:
+    # a contrast is identified only if BOTH sides cover the full preregistered
+    # windows. On 13 rows this is a strict no-op (verified bit-identical).
+    e2_episodes = sorted({crisis_episode(d) for d in crisis_s})
+    e2_gated = len(crisis_s) < len(CRISIS) or len(calm_s) < len(calm)
+    e2_coverage = {
+        "n_crisis_shared": len(crisis_s), "n_calm_shared": len(calm_s),
+        "n_crisis_pre": len(CRISIS), "n_calm_pre": len(calm),
+        "episodes_shared": e2_episodes,
+        "arms_cover_same_dates": (
+            {d for d in D_pre if D_pre[d]} == {d for d in M_pre if M_pre[d]}),
+    }
+
+    # E3 (pre-cutoff W transplant), under the same parity rule as E2.
+    #
+    # Both sides come from the W arm, so it is tempting to call E3 immune to
+    # sample mismatch. That is wrong whenever W's coverage is partial: the
+    # fake-date re-key maps W's covered dates onto their *images* under fmap,
+    # so the two keyings populate different crisis/calm slots. With full
+    # coverage fmap is a permutation of the covered set and the two sides
+    # coincide (true on 13 rows -- verified bit-identical). On the reduced
+    # 65-date tier they do not: llama3.2:3b ends up differencing two disjoint
+    # crisis windows (5 dates true side, 1 fake side, 0 shared).
     W_pre = pre_only(arms["W"])
     w_fake = defaultdict(list)
     for td, xs in W_pre.items():
-        w_fake[fmap[td]].extend(xs)
-    g_wf, g_wt = gap(w_fake, CRISIS, calm), gap(W_pre, CRISIS, calm)
+        if xs:
+            w_fake[fmap[td]].extend(xs)
+    shared_w = {d for d in w_fake if d in W_pre and w_fake[d] and W_pre[d]}
+    crisis_w = [d for d in CRISIS if d in shared_w]
+    calm_w = [d for d in calm if d in shared_w]
+    g_wf, g_wt = gap(w_fake, crisis_w, calm_w), gap(W_pre, crisis_w, calm_w)
     e3 = g_wf - g_wt
-    e3_ci = boot_diff(lambda c, q: gap(w_fake, c, q), lambda c, q: gap(W_pre, c, q), CRISIS, calm, rng)
+    e3_ci = boot_diff(lambda c, q: gap(w_fake, c, q), lambda c, q: gap(W_pre, c, q),
+                      crisis_w, calm_w, rng) if len(crisis_w) >= 2 and len(calm_w) >= 2 \
+        else (float("nan"), float("nan"))
+    e3_episodes = sorted({crisis_episode(d) for d in crisis_w})
+    e3_gated = len(crisis_w) < len(CRISIS) or len(calm_w) < len(calm)
+    e3_coverage = {
+        "n_crisis_shared": len(crisis_w), "n_calm_shared": len(calm_w),
+        "n_crisis_pre": len(CRISIS), "n_calm_pre": len(calm),
+        "episodes_shared": e3_episodes,
+    }
 
-    # P1 placebo (post-cutoff D−M bearish share diff)
-    def share(bd):
-        xs = [x for v in bd.values() for x in v]
+    # P1 placebo (post-cutoff D−M bearish share diff), under the same parity
+    # rule. This contrast is a difference of pooled SHARES, not of gaps, but it
+    # is still a two-sample contrast and the same attrition applies: on
+    # llama3.2:3b, D covers 8 post-cutoff dates and M covers 11, sharing 6, and
+    # the unmatched value (-.033) differs from the date-matched one (-.125) by
+    # 9.2pp of pure date composition. Every covered cell carries 8 sketches in
+    # both arms, so pooling equals a per-date mean and the whole gap is
+    # composition.
+    def share(bd, dates=None):
+        src = bd if dates is None else {d: bd[d] for d in dates if d in bd}
+        xs = [x for v in src.values() for x in v]
         return sum(1 for x in xs if x == "-") / len(xs) if xs else float("nan")
-    p1 = share(post_only(arms["D"])) - share(post_only(arms["M"]))
+    D_post, M_post = post_only(arms["D"]), post_only(arms["M"])
+    post_shared = sorted({d for d in D_post if d in M_post and D_post[d] and M_post[d]})
+    p1 = share(D_post, post_shared) - share(M_post, post_shared)
+    p1_gated = ({d for d in D_post if D_post[d]} != {d for d in M_post if M_post[d]})
+    p1_coverage = {
+        "n_post_D": len({d for d in D_post if D_post[d]}),
+        "n_post_M": len({d for d in M_post if M_post[d]}),
+        "n_post_shared": len(post_shared),
+    }
 
     # REC (recovery probe, pre vs post); file absent = probe not run for this
     # row -> columns "-"
@@ -196,9 +282,31 @@ def main() -> None:
 
     row = {
         "model": args.model,
-        "E2_date_trigger": {"est": e2, "ci95": e2_ci, "gap_D": g_d, "gap_M": g_m},
-        "E3_transplant": {"est": e3, "ci95": e3_ci, "gap_fake": g_wf, "gap_true": g_wt},
+        "E2_date_trigger": {
+            "est": e2, "ci95": e2_ci, "gap_D": g_d, "gap_M": g_m,
+            "gated": e2_gated,
+            "gate_reason": ("D and M return usable generations on different "
+                            "dates, so the shared window is selected by "
+                            "attrition rather than by design; E2 unidentified"
+                            if e2_gated else None),
+            "coverage": e2_coverage,
+        },
+        "E3_transplant": {
+            "est": e3, "ci95": e3_ci, "gap_fake": g_wf, "gap_true": g_wt,
+            "gated": e3_gated,
+            "gate_reason": ("W's coverage is partial, so the true-date and "
+                            "fake-date keyings populate different windows; "
+                            "E3 unidentified" if e3_gated else None),
+            "coverage": e3_coverage,
+        },
         "P1_placebo_postcutoff": p1,
+        "P1_placebo_detail": {
+            "est": p1, "gated": p1_gated,
+            "gate_reason": ("D and M cover different post-cutoff dates; the "
+                            "placebo contrast is unidentified"
+                            if p1_gated else None),
+            "coverage": p1_coverage,
+        },
         "REC": {"pre": rec_pre, "post": rec_post},
         "LAP": {"pre_mean": lap_pre, "post_mean": lap_post, "empirical_cutoff": emp_cutoff,
                 "recall_hit_rate": lap_hit, "recall_n": lap_hit_n},

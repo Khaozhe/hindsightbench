@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Regenerate the benchmark leaderboard from frozen row jsons (no hand-typing).
 
-Reads  outputs/bench/<key>/<key>_row.json            (six-metric row, frozen)
+Reads  outputs/bench/<key>/<key>_row.json            (frozen audit row)
        outputs/bench/<key>/model_relative_placebo.json (P1 for ᴹ-marked rows)
        scripts/bench_registry.py                     (display metadata only)
 Writes outputs/bench/BENCH_ROWS.md    — table block between BEGIN/END markers
@@ -59,6 +59,7 @@ def load(m: dict) -> dict:
     out = {
         "e2": r["E2_date_trigger"], "e3": r["E3_transplant"],
         "p1_cal": r.get("P1_placebo_postcutoff"),
+        "p1_gated": (r.get("P1_placebo_detail") or {}).get("gated", False),
         "p1_rel": None,
         "rec": r.get("REC", {}), "lap": r["LAP"],
         "dd": r.get("delta_dissociation") or {},
@@ -76,6 +77,16 @@ def est_ci(e: dict) -> str:
 
 def cell_e(m: dict, d: dict, which: str, md: bool) -> str:
     e = d[which]
+    # Sample-parity gate. Under partial schema compliance the two sides of a
+    # contrast return usable generations on DIFFERENT dates, so the surviving
+    # intersection is selected by attrition rather than by design; a contrast is
+    # reported only when both sides cover the full preregistered windows.
+    # (An earlier version of this comment justified the gate by the shared
+    # crisis window spanning a single preregistered episode. That rationale is
+    # retracted -- E.1 reports single-episode fits as confirming evidence -- and
+    # E.12 records the retraction.)
+    if e.get("gated"):
+        return "-ᵏ" if md else r"---\textsuperscript{k}"
     s = est_ci(e)
     sparse = which == "e3" and m["e3_sparse"]
     W = which.upper().replace("E", "E")  # "E2"/"E3"
@@ -104,6 +115,10 @@ def cell_p1(m: dict, d: dict, md: bool) -> str:
     if m["p1"] == "model_relative":
         v = f"{d['p1_rel']:+.3f}"
         return v + "ᴹ" if md else texify(v) + r"\textsuperscript{m}"
+    # same parity gate as E2/E3: if D and M cover different post-cutoff dates
+    # the shared window is attrition-selected, so no point estimate is printed
+    if d.get("p1_gated"):
+        return EMDASH + "ᵏ" if md else r"---\textsuperscript{k}"
     v = f"{d['p1_cal']:+.3f}"
     return v if md else texify(v)
 
@@ -227,6 +242,10 @@ def csv_export() -> str:
         "rec_post_n", "lap_pre", "lap_post", "empirical_cutoff",
         "recall_hit_rate", "recall_n", "delta", "delta_t", "delta_n",
         "valid_sketch_rate", "cells", "lap_at_chance", "delta_gate", "rec_mode",
+        # sample-parity gate: when true the e2/e3 estimate columns hold the
+        # date-matched value but the cell is UNIDENTIFIED and the papers print
+        # an em-dash. A consumer reading the estimate alone would be misled.
+        "e2_gated", "e3_gated", "p1_gated",
     ])
     for m in MODELS:
         d = load(m)
@@ -242,6 +261,8 @@ def csv_export() -> str:
             dd.get("delta"), dd.get("t"), dd.get("n"),
             d["valid"]["sketch_rate"], d["valid"]["cells"],
             m["lap_at_chance"], m["delta_gate"], m["rec"],
+            bool(d["e2"].get("gated")), bool(d["e3"].get("gated")),
+            bool(d.get("p1_gated")),
         ])
     return buf.getvalue()
 

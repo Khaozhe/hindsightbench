@@ -15,8 +15,9 @@ pre-freeze core experiments that seeded the protocol, as noted below).
 **Papers.** Protocol/benchmark paper: *HindsightBench: A Black-Box
 Behavioral Audit Protocol for Parametric Hindsight in Time-Indexed LLM
 Decision Tasks* (arXiv:2607.18867, https://arxiv.org/abs/2607.18867). The companion
-findings paper is under double-blind review and is not distributed from
-this repository.
+findings paper --- the causal anatomy on the equity task from which this
+protocol was abstracted --- is not yet publicly available and is not
+distributed from this repository.
 
 ## Repository layout
 

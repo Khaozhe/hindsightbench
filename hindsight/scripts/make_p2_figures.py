@@ -100,7 +100,7 @@ def fig6() -> None:
         "REC recoverability ($n{\\geq}10$)\n"
         "cutoff = LAP collapse (hit>chance)\n"
         "$\\delta$ dissociation (LAP var. gate)\n"
-        "+ VALID compliance floor",
+        "+ VALID compliance rate",
         fc="#f4f2ee", fs=6.4)
     arrow(ax, 69.2, 24, 73.2, 20, lw=1.0)
     arrow(ax, 68.8, 12, 73.2, 12, color=GOLD, lw=1.0)

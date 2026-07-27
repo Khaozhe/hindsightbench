@@ -11,6 +11,7 @@ Usage: python make_figures.py            # writes hindsight/paper/figures/fig{1,
 from __future__ import annotations
 
 import json
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -35,8 +36,40 @@ CRISIS_SPANS = [("2008-09", "2009-02"), ("2020-03", "2020-04"), ("2022-06", "202
 plt.rcParams.update({
     "font.size": 9, "axes.spines.top": False, "axes.spines.right": False,
     "figure.dpi": 150, "savefig.bbox": "tight",
-    "pdf.fonttype": 42, "ps.fonttype": 42,  # AAAI forbids Type 3 fonts
+    "pdf.fonttype": 42, "ps.fonttype": 42,  # Type 3 fonts are a hard reject
 })
+
+# Findings-paper class geometry: \columnwidth = 239.394pt, \textwidth =
+# 505.89pt (TeX pt, 72.27/in). Main-paper figures 1/2/4 are built at their
+# FINAL printed size, so \includegraphics renders them at scale ~1.0 and every
+# native >=9pt glyph stays >=9pt on the page (9pt floor).
+TEXPT = 72.27
+COLW_IN = 239.394 / TEXPT    # \columnwidth in inches
+TEXTW_IN = 505.89 / TEXPT    # \textwidth in inches
+
+
+def _pdf_size_in(path: Path) -> tuple[float, float]:
+    m = re.search(rb"/MediaBox\s*\[([^\]]+)\]", path.read_bytes())
+    x0, y0, x1, y1 = map(float, m.group(1).split())
+    return (x1 - x0) / 72.0, (y1 - y0) / 72.0
+
+
+def savefig_exact(fig, name: str, w_in: float, h_in: float, tol: float = 0.004) -> None:
+    """Save {name}.pdf/.png with the tight-cropped output at exactly
+    (w_in, h_in) inches: savefig.bbox="tight" crops to content, so the figsize
+    is iteratively compensated until the cropped PDF hits the target size.
+    Deterministic (fixed-point iteration on the same inputs)."""
+    pdf = FIGS / f"{name}.pdf"
+    fw, fh = w_in, h_in
+    for _ in range(8):
+        fig.set_size_inches(fw, fh)
+        fig.savefig(pdf, pad_inches=0.02)  # thin pad: page real estate goes to >=9pt content
+        aw, ah = _pdf_size_in(pdf)
+        if abs(aw - w_in) < tol and abs(ah - h_in) < tol:
+            break
+        fw += w_in - aw
+        fh += h_in - ah
+    fig.savefig(FIGS / f"{name}.png", pad_inches=0.02)
 
 
 def yearly_share(by_date: dict[str, list[str]]) -> dict[str, float]:
@@ -53,17 +86,24 @@ def fig1() -> None:
     years = sorted(yr_r)
     xs = [int(y) for y in years]
 
-    fig, ax = plt.subplots(figsize=(6.4, 1.8))
+    # true-size 0.9\columnwidth; height keeps the pre-change 405.8x130.2bp
+    # aspect (0.3208) so the LaTeX layout does not move
+    w_in = 0.9 * COLW_IN
+    fig, ax = plt.subplots(figsize=(w_in, w_in * 0.3208))
     for a, b in [(2008, 2009), (2020, 2020), (2022, 2022)]:
         ax.axvspan(a - 0.4, b + 0.4, color="0.88", zorder=0)
-    ax.plot(xs, [yr_r[y] for y in years], "o-", ms=3.5, lw=1.4, color="#B3402A", label="R (date revealed)")
-    ax.plot(xs, [yr_m[y] for y in years], "s-", ms=3.5, lw=1.4, color="#2A6EB3", label="M (date masked)")
-    ax.set_ylabel("bearish share")
-    ax.set_xticks(range(2005, 2025, 2))
+    # legend labels are the arm letters only (caption defines R = revealed,
+    # M = masked); the single row sits over the empty 2011-2017 high band
+    ax.plot(xs, [yr_r[y] for y in years], "o-", ms=3, lw=1.1, color="#B3402A", label="R")
+    ax.plot(xs, [yr_m[y] for y in years], "s-", ms=3, lw=1.1, color="#2A6EB3", label="M")
+    ax.set_ylabel("bearish\nshare")  # two lines: the strip is shorter than the rotated one-liner
+    ax.set_xticks(range(2005, 2026, 4))
+    ax.set_xticks(range(2005, 2025, 1), minor=True)
+    ax.set_yticks([0, 0.2, 0.4, 0.6])
     ax.set_ylim(0, 0.75)
-    ax.legend(frameon=False, loc="upper left", ncol=2)
-    fig.savefig(FIGS / "fig1_yearly_bearish.pdf")
-    fig.savefig(FIGS / "fig1_yearly_bearish.png")
+    ax.legend(frameon=False, loc="upper center", bbox_to_anchor=(0.5, 1.04),
+              ncol=2, handlelength=1.5, columnspacing=1.2, handletextpad=0.5)
+    savefig_exact(fig, "fig1_yearly_bearish", w_in, w_in * 0.3208)
     plt.close(fig)
     print("fig1:", {y: (round(yr_r[y], 3), round(yr_m[y], 3)) for y in ("2008", "2013", "2022")})
 
@@ -82,24 +122,29 @@ def fig2() -> None:
         return sum(1 for x in xs if x == "-") / len(xs) if xs else float("nan")
 
     groups = {
-        "true-date\nlabeling": (share(w, CRISIS), share(w, calm)),
-        "fake-date\nlabeling": (share(w_fake, CRISIS), share(w_fake, calm)),
+        "true\ndate": (share(w, CRISIS), share(w, calm)),
+        "fake\ndate": (share(w_fake, CRISIS), share(w_fake, calm)),
     }
-    fig, ax = plt.subplots(figsize=(3.4, 2.3))
+    # true-size 0.5\columnwidth; height keeps the pre-change 238.4x170.5bp
+    # aspect (0.7152) so the LaTeX layout does not move
+    w_in = 0.5 * COLW_IN
+    fig, ax = plt.subplots(figsize=(w_in, w_in * 0.7152))
     xpos = np.arange(2)
     width = 0.34
     ax.bar(xpos - width / 2, [g[0] for g in groups.values()], width,
-           color="#B3402A", label="crisis window")
+           color="#B3402A", label="crisis")
     ax.bar(xpos + width / 2, [g[1] for g in groups.values()], width,
-           color="#C8C8C8", label="calm window")
+           color="#C8C8C8", label="calm")
     for i, (c, q) in enumerate(groups.values()):
-        ax.annotate(f"gap {c - q:+.3f}", (i, max(c, q) + 0.02), ha="center", fontsize=8)
+        ax.annotate(f"{c - q:+.3f}", (i, max(c, q) + 0.02), ha="center")
     ax.set_xticks(xpos, list(groups))
-    ax.set_ylabel("W-arm bearish share")
-    ax.set_ylim(0, 0.75)
-    ax.legend(frameon=False, loc="upper left")
-    fig.savefig(FIGS / "fig2_transplant.pdf")
-    fig.savefig(FIGS / "fig2_transplant.png")
+    ax.set_xlim(-0.55, 1.45)  # keeps the "-0.057" annotation clear of the y-spine
+    ax.set_ylabel("bearish share")
+    ax.set_yticks([0, 0.3, 0.6])
+    ax.set_ylim(0, 0.78)
+    ax.legend(frameon=False, loc="lower center", bbox_to_anchor=(0.45, 0.98),
+              ncol=2, handlelength=1.0, columnspacing=0.9, handletextpad=0.4)
+    savefig_exact(fig, "fig2_transplant", w_in, w_in * 0.7152)
     plt.close(fig)
     print("fig2:", {k.replace(chr(10), " "): (round(v[0], 3), round(v[1], 3)) for k, v in groups.items()})
 
@@ -178,7 +223,14 @@ def fig4() -> None:
     M = np.array(rows, float)
     x0, x1 = frac_year(month_axis[0]) - 1 / 24, frac_year(month_axis[-1]) + 1 / 24
 
-    fig, ax = plt.subplots(figsize=(6.4, 1.92))
+    # true-size 0.74\textwidth. Twelve 9pt label rows only fit inside the old
+    # 111pt printed height by reclaiming every non-data band: the in-figure
+    # legend is dropped (the caption already defines both tick types), the
+    # tight-bbox pad is cropped 0.1->0.02in, and labels avoid tall parens.
+    # Net: printed aspect preserved (0.2960 -> 0.2953).
+    w_in = 0.74 * TEXTW_IN
+    h_in = 1.53
+    fig, ax = plt.subplots(figsize=(w_in, h_in))
     im = ax.imshow(M, aspect="auto", cmap="Blues", vmin=0, vmax=1,
                    extent=[x0, x1, len(models) - 0.5, -0.5], interpolation="nearest")
     # row separators
@@ -191,23 +243,17 @@ def fig4() -> None:
         if claimed:
             ax.plot([frac_year(claimed)] * 2, [k - 0.5, k + 0.5], color="0.15",
                     lw=1.4, ls=(0, (1, 1)), zorder=4)
-    labels = [f"{d}  ({m})" for _, m, _, d in models]
-    ax.set_yticks(range(len(models)), labels, fontsize=6.3)
-    ax.set_xticks(range(2005, 2027, 2))
-    ax.tick_params(length=2, labelsize=7)
+    # paren-free cutoff month: "(" / ")" are the tallest glyphs at 9pt and
+    # would force a taller row pitch than the digits/caps actually need
+    labels = [f"{d} · {m}" for _, m, _, d in models]
+    ax.set_yticks(range(len(models)), labels)
+    ax.set_xticks(range(2005, 2027, 4))
+    ax.tick_params(length=2, pad=1.5)
     ax.set_xlim(x0, x1)
-    from matplotlib.lines import Line2D
-    handles = [
-        Line2D([], [], color="#C1272D", lw=1.6, label="measured cutoff (LAP collapse)"),
-        Line2D([], [], color="0.15", lw=1.4, ls=(0, (1, 1)), label="vendor-reported cutoff"),
-    ]
-    ax.legend(handles=handles, frameon=False, fontsize=6.3, ncol=2,
-              loc="lower left", bbox_to_anchor=(0.0, 1.01))
     cb = fig.colorbar(im, ax=ax, fraction=0.035, pad=0.012)
-    cb.set_label("LAP", fontsize=7)
-    cb.ax.tick_params(labelsize=6.5)
-    fig.savefig(FIGS / "fig4_lap_collapse.pdf")
-    fig.savefig(FIGS / "fig4_lap_collapse.png")
+    cb.set_label("LAP")
+    cb.set_ticks([0, 0.5, 1])
+    savefig_exact(fig, "fig4_lap_collapse", w_in, h_in)
     plt.close(fig)
     print("fig4: done (heatmap)")
 
@@ -228,8 +274,17 @@ def fig5() -> None:
 
     open_rows = []  # (label, x pos B, E2, lo, hi, generation, low_validity)
     api_rows = []   # (label, slot, E2, lo, hi, generation)
+    gated = []      # rows whose E2 is unidentified -> plotted as absent, not zero
     for m in BENCH_MODELS:
         f5 = m["fig5"]
+        r = _json.loads(
+            (BENCH_DIR / m["key"] / f"{m['key']}_row.json").read_text())
+        if r["E2_date_trigger"].get("gated"):
+            # An unidentified cell must not be drawn: a point at its estimate
+            # would read as evidence, and omitting it silently would read as a
+            # missing model. Record it so the caption can name it.
+            gated.append(f5["label"])
+            continue
         est, lo, hi, valid = e2(m)
         if f5["panel"] == "open":
             open_rows.append((f5["label"], f5["x"], est, lo, hi, m["gen"],
@@ -278,19 +333,17 @@ def fig5() -> None:
     handles = [Line2D([], [], color=gen_color[g], marker="o", ls="", label=f"{g} generation")
                for g in (2024, 2025, 2026)]
     handles.append(Line2D([], [], color="0.4", marker="o", markerfacecolor="white",
-                          ls="", label="low compliance (52\u201379%)"))
+                          ls="", label="low compliance (79%)"))
     ax.legend(handles=handles, frameon=False, fontsize=6.5, loc="upper right")
     fig.savefig(FIGS / "fig5_scale_generation.pdf")
     fig.savefig(FIGS / "fig5_scale_generation.png")
     plt.close(fig)
-    print("fig5: done")
+    print(f"fig5: done (E2 gated, not plotted: {gated or 'none'})")
 
 
 if __name__ == "__main__":
     FIGS.mkdir(parents=True, exist_ok=True)
-    fig1()
-    fig2()
-    fig3()
-    fig4()
-    fig5()
+    todo = sys.argv[1:] or ["fig1", "fig2", "fig3", "fig4", "fig5"]
+    for name in todo:
+        globals()[name]()
     print("figures written to", FIGS)
