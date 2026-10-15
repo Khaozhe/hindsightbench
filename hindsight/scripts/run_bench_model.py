@@ -112,6 +112,11 @@ async def run_arms(provider: str, model: str, concurrency: int, smoke: bool) -> 
         cdir.mkdir(parents=True, exist_ok=True)
         (cdir / "04_raw_response.txt").write_text(raw)
         (cdir / "01_sketches_valid.json").write_text(json.dumps(valid, indent=2))
+        # a resume pass that recovers a parse-failed cell keeps the failed attempt's marker as a
+        # record, renamed so the row's parse_err_cells counts only cells still failed
+        stale = cdir / "99_parse_error.txt"
+        if stale.exists():
+            stale.rename(cdir / "99_parse_error_superseded.txt")
         (cdir / "03_run_meta.json").write_text(json.dumps({
             "decision_date": dd, "arm": arm, "rep": rep, "cohort": node["cohort"],
             "fake_date": node["fake_date"] if arm == "W" else None,
@@ -130,7 +135,7 @@ async def run_arms(provider: str, model: str, concurrency: int, smoke: bool) -> 
     # generation needs ~330s wall. The old 240s killed nearly every request
     # pre-completion (timeout->retry livelock: 10 cells/h at 750 tok/s served);
     # fp8 only ever fit because it is ~2x faster. Same kimi lesson as probes.
-    async with httpx.AsyncClient(timeout=900.0, limits=limits) as client:
+    async with httpx.AsyncClient(timeout=3600.0, limits=limits) as client:
         rs = await asyncio.gather(*(cell(n, a, r) for n, a, r in jobs), return_exceptions=True)
     ok = sum(1 for r in rs if isinstance(r, str) and r.startswith("OK"))
     skip = sum(1 for r in rs if r == "SKIP")

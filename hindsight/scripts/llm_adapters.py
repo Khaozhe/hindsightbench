@@ -103,6 +103,7 @@ async def call_openai_compat(
     temperature: float,
     max_tokens: int,
     json_mode: bool = True,
+    extra_payload: dict | None = None,
 ) -> tuple[str, str]:
     """Returns (text, reported_model). Retries on 429/5xx/timeouts."""
     url = PROVIDERS[provider]["base_url"] + "/chat/completions"
@@ -126,6 +127,8 @@ async def call_openai_compat(
         payload.pop("temperature")
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
+    if extra_payload:
+        payload.update(extra_payload)   # e.g. {"thinking": {"type": "disabled"}} for probes
     delay = RETRY_BASE_DELAY
     last: Exception | None = None
     for attempt in range(MAX_RETRIES + 1):
@@ -159,6 +162,49 @@ async def call_openai_compat(
 
 
 USAGE_LOG_OAI = REPO / "hindsight/outputs/openai_compat_usage_log.jsonl"
+ANTHROPIC_KEY_FILE = REPO / "Anthropic_API_KEY.env"
+
+
+async def call_anthropic_messages(
+    client: httpx.AsyncClient,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    temperature: float,
+    max_tokens: int,
+) -> tuple[str, str]:
+    """Anthropic Messages API over raw httpx (no SDK dependency). Returns (text, reported_model).
+    Retries on 429/5xx/529 and timeouts; logs exact usage to the same ledger as the OpenAI path."""
+    key = next(l.split("=", 1)[1].strip() for l in ANTHROPIC_KEY_FILE.read_text().splitlines() if "=" in l)
+    headers = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+    payload = {"model": model, "max_tokens": max_tokens, "temperature": temperature,
+               "system": system_prompt, "messages": [{"role": "user", "content": user_prompt}]}
+    if model.startswith("claude-sonnet-5"):   # rejects non-default sampling (BM-1 disclosed deviation)
+        payload.pop("temperature")
+    delay = RETRY_BASE_DELAY
+    last: Exception | None = None
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            r = await client.post("https://api.anthropic.com/v1/messages", json=payload, headers=headers)
+            if r.status_code in (429, 529) or r.status_code >= 500:
+                raise httpx.HTTPStatusError(f"HTTP {r.status_code}", request=r.request, response=r)
+            r.raise_for_status()
+            d = r.json()
+            u = d.get("usage", {}) or {}
+            _log_openai_usage("anthropic", {"model": d.get("model"), "usage": {
+                "prompt_tokens": u.get("input_tokens", 0), "completion_tokens": u.get("output_tokens", 0)}})
+            txt = "".join(b.get("text", "") for b in d.get("content", []) if b.get("type") == "text").strip()
+            if d.get("stop_reason") == "max_tokens":
+                raise RuntimeError(f"anthropic/{model}: truncated (stop_reason=max_tokens), not retrying")
+            return txt, d.get("model", model)
+        except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.TransportError) as e:
+            last = e
+            if attempt == MAX_RETRIES:
+                break
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 60)
+    raise RuntimeError(f"anthropic/{model}: gave up after retries: {last}")
 
 
 def _log_openai_usage(provider: str, d: dict) -> None:

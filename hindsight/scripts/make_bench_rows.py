@@ -40,6 +40,24 @@ TEX_E = "% END GENERATED ROWS"
 
 EMDASH = "—"
 
+# Serving column (paper 2 only): from models.yaml `quant`, mapped to the tier
+# vocabulary of Section 9.1; API rows show "API".
+import yaml  # noqa: E402
+_MODELS_YAML = REPO / "hindsight/models.yaml"
+_SERVING_MAP = {
+    "api": "API", "fp8-official": "FP8", "fp8-dynamic-vllm": "FP8",
+    "awq-int4": "AWQ-INT4", "bf16": "BF16", "ollama-q4": "Q4 (ollama)",
+}
+
+
+def serving(m: dict) -> str:
+    try:
+        cfg = yaml.safe_load(_MODELS_YAML.read_text())
+    except Exception:  # pragma: no cover
+        return "?"
+    q = (cfg.get(m["key"]) or {}).get("quant", "?")
+    return _SERVING_MAP.get(q, q)
+
 
 def pct(x: float) -> int:
     """Percent, rounding decimal ties half-even (0.925 -> 92), immune to
@@ -213,7 +231,7 @@ def md_table() -> str:
     return "\n".join(lines)
 
 
-def tex_rows() -> str:
+def tex_rows(with_serving: bool = False) -> str:
     lines = []
     for m in MODELS:
         d = load(m)
@@ -221,6 +239,7 @@ def tex_rows() -> str:
                            if m["name_sup"] else "")
         lines.append(" & ".join([
             name, str(m["gen"]),
+            *([serving(m)] if with_serving else []),
             cell_e(m, d, "e2", False), cell_e(m, d, "e3", False),
             cell_p1(m, d, False), cell_rec(m, d, False), cell_lap(m, d, False),
             cell_cutoff(m, d, False), cell_delta(m, d, False),
@@ -287,7 +306,7 @@ def main() -> None:
     for tex_path in (TEX, TEX2):
         if tex_path.exists():
             targets.append((tex_path, splice(tex_path.read_text(), TEX_B,
-                                             TEX_E, tex_rows())))
+                                             TEX_E, tex_rows(with_serving=tex_path == TEX2))))
         else:
             print(f"note: {tex_path.name} not present "
                   "(paper sources not bundled) — skipped")

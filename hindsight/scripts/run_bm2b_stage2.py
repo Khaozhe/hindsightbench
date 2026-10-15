@@ -39,10 +39,41 @@ from hindsight_paths import REPO
 BENCH = REPO / "hindsight/outputs/bench"
 EXEMPLARS = REPO / "hindsight/prereg/BM2b_exemplars.json"
 PREREG = "BM2b_prereg_base_vs_instruct.md 51e03b53 + exemplars fb0e0c14"
+PREREG_GUIDED = "BM2c_prereg_olmo_ladder.md afa19e6d + BM2c_addendum_base_guided.md"
 BASE_URL = os.environ.get("REMOTE_VLLM_URL", "http://localhost:8000/v1")
 SEP = "\n\n---\n\n"
 ARM_MAX_TOKENS = 8192
 LAP_MAX_TOKENS = 8
+REGIME = "2shot"   # set from --regime; "guided" = BM-2c addendum (zero-shot, grammar-constrained)
+SERIES = ["GDPC1", "CPIAUCSL", "PAYEMS", "INDPRO", "RSAFS", "UNRATE", "HOUST", "FEDFUNDS"]
+# Exactly the fields the frozen system prompt demands (BM2b_exemplars.json sketches carry
+# them all); validate_sketches only checks direction/mechanism_narrative/candidate_proxies/
+# regime_hint, so the grammar is a superset of the validator, never a relaxation.
+SKETCH_SCHEMA = {
+    "type": "array", "minItems": 8, "maxItems": 8,
+    "items": {
+        "type": "object", "additionalProperties": False,
+        "properties": {
+            "hypothesis_id": {"type": "string", "maxLength": 16},
+            "dominant_domain": {"type": "string", "maxLength": 40},
+            "mechanism_narrative": {"type": "string", "minLength": 40, "maxLength": 700},
+            "direction": {"type": "string", "enum": ["+", "-"]},
+            "candidate_proxies": {"type": "array", "minItems": 1, "maxItems": 4,
+                                  "items": {"type": "string", "enum": SERIES}},
+            "candidate_horizon_hint": {"type": "integer", "minimum": 1, "maximum": 250},
+            "candidate_trigger": {"type": "string", "maxLength": 120},
+            "candidate_interactions": {"type": "boolean"},
+            "evidence_refs": {"type": "array", "minItems": 1, "maxItems": 6,
+                              "items": {"type": "string", "maxLength": 40}},
+            "regime_hint": {"type": "string", "maxLength": 120},
+            "failure_condition": {"type": "string", "minLength": 20, "maxLength": 400},
+        },
+        "required": ["hypothesis_id", "dominant_domain", "mechanism_narrative", "direction",
+                     "candidate_proxies", "candidate_horizon_hint", "candidate_trigger",
+                     "candidate_interactions", "evidence_refs", "regime_hint", "failure_condition"],
+    },
+}
+LAP_SCHEMA = {"type": "string", "enum": ["up", "down", "unknown"]}
 
 
 def two_shot_prefix() -> str:
@@ -55,17 +86,19 @@ def two_shot_prefix() -> str:
 
 
 async def completion(client: httpx.AsyncClient, served: str, prompt: str,
-                     max_tokens: int, temperature: float) -> str:
-    r = await client.post(f"{BASE_URL}/completions", json={
-        "model": served, "prompt": prompt, "max_tokens": max_tokens,
-        "temperature": temperature, "stop": ["\n---"],
-    })
+                     max_tokens: int, temperature: float, schema: dict | None = None) -> str:
+    body = {"model": served, "prompt": prompt, "max_tokens": max_tokens,
+            "temperature": temperature, "stop": ["\n---"]}
+    if schema is not None:
+        body["structured_outputs"] = {"json": schema}   # vLLM >= 0.11 name; 0.29 verified 2026-09-14
+    r = await client.post(f"{BASE_URL}/completions", json=body)
     r.raise_for_status()
     return r.json()["choices"][0]["text"]
 
 
 async def run_arms(outname: str, served: str, concurrency: int, smoke: bool) -> None:
-    prefix = two_shot_prefix()
+    prefix = two_shot_prefix() if REGIME == "2shot" else ""
+    schema = SKETCH_SCHEMA if REGIME == "guided" else None
     nodes = all_bench_nodes()
     if smoke:
         nodes = [n for n in nodes if n["decision_date"] in ("2008-10-15", "2014-04-15")]
@@ -82,7 +115,7 @@ async def run_arms(outname: str, served: str, concurrency: int, smoke: bool) -> 
         prompt = prefix + f"{n['system']}\n\n{user}\n\nOutput:\n"
         try:
             async with sem:
-                raw = await completion(client, served, prompt, ARM_MAX_TOKENS, 0.2)
+                raw = await completion(client, served, prompt, ARM_MAX_TOKENS, 0.2, schema)
         except Exception as exc:
             print(f"ERR {arm} {dd}: {exc}", file=sys.stderr, flush=True)
             counts["ERR"] += 1
@@ -97,20 +130,26 @@ async def run_arms(outname: str, served: str, concurrency: int, smoke: bool) -> 
             counts["PARSE_ERR"] += 1
             return
         (cdir / "01_sketches_valid.json").write_text(json.dumps(valid, indent=2))
+        # a resume pass that recovers a parse-failed cell keeps the failed attempt's marker
+        # as a record, renamed so the row's parse_err_cells counts only cells still failed
+        stale = cdir / "99_parse_error.txt"
+        if stale.exists():
+            stale.rename(cdir / "99_parse_error_superseded.txt")
         (cdir / "03_run_meta.json").write_text(json.dumps({
             "decision_date": dd, "arm": arm, "rep": 1, "cohort": n["cohort"],
             "fake_date": n["fake_date"] if arm == "W" else None,
             "condition": outname, "served_model": served,
-            "format": "2shot-completion", "temperature": 0.2,
+            "format": "2shot-completion" if REGIME == "2shot" else "guided-zeroshot-completion",
+            "temperature": 0.2,
             "valid_count": len(valid), "invalid_count": invalid,
             "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
             "generated_at": dt.datetime.now().isoformat(timespec="seconds"),
-            "prereg": PREREG,
+            "prereg": PREREG if REGIME == "2shot" else PREREG_GUIDED,
         }, indent=2))
         counts["OK"] += 1
 
     global client
-    async with httpx.AsyncClient(timeout=900.0,
+    async with httpx.AsyncClient(timeout=3600.0,
                                  limits=httpx.Limits(max_connections=concurrency + 2)) as client:
         await asyncio.gather(*(cell(*j) for j in jobs))
     print(f"{outname} arms done: {counts}", flush=True)
@@ -137,12 +176,13 @@ async def run_lap(outname: str, served: str, concurrency: int, reps: int) -> Non
     async def one(t, k):
         prompt = f"{LAP_SYSTEM}\n\n{LAP_PROMPT.format(t=t, t_end=trading_day_end(t))}\nAnswer:"
         async with sem:
-            raw = await completion(client, served, prompt, LAP_MAX_TOKENS, 1.0)
-        ans = raw.strip().lower().split()[0].strip('."\'') if raw.strip() else ""
+            raw = await completion(client, served, prompt, LAP_MAX_TOKENS, 1.0,
+                                   LAP_SCHEMA if REGIME == "guided" else None)
+        ans = raw.strip().lower().strip('"').split()[0].strip('."\'') if raw.strip() else ""
         if ans not in ("up", "down", "unknown"):
             ans = "invalid"
         return {"decision_date": t, "rep": k, "answer": ans, "raw": raw[:60],
-                "condition": outname}
+                "condition": outname, "regime": REGIME}
 
     global client
     async with httpx.AsyncClient(timeout=300.0,
@@ -165,7 +205,10 @@ def main() -> None:
     ap.add_argument("--job", choices=["arms", "lap", "smoke"], required=True)
     ap.add_argument("--concurrency", type=int, default=32)
     ap.add_argument("--lap-reps", type=int, default=10)
+    ap.add_argument("--regime", choices=["2shot", "guided"], default="2shot")
     args = ap.parse_args()
+    global REGIME
+    REGIME = args.regime
     if args.job == "smoke":
         asyncio.run(run_arms(args.outname, args.served, 4, smoke=True))
     elif args.job == "arms":
