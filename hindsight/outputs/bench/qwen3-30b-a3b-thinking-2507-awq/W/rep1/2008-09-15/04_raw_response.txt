@@ -1,0 +1,737 @@
+We are given a decision time point: 2014-03-15. Only data available on or before this date is admissible.
+
+Observable Catalog (with series IDs and domains):
+- GDPC1 (demand, quarterly, Billions of Chained 2017 Dollars)
+- CPIAUCSL (monetary, monthly, Index 1982-1984=100)
+- PAYEMS (labor, monthly, Thousands of Persons)
+- INDPRO (supply, monthly, Index 2017=100)
+- RSAFS (demand, monthly, Millions of Dollars)
+- UNRATE (labor, monthly, Percent)
+- HOUST (demand, monthly, Thousands of Units)
+- FEDFUNDS (monetary, monthly, Percent per Annum)
+
+Target: S&P 500 forward 20-day returns (direction_20d = sign(log(Close[t+20] / Close[t])))
+
+We must generate 8 hypotheses (H_001 to H_008) that are concrete, falsifiable, and use only the provided series IDs.
+
+Constraints:
+- Cover at least 3 different dominant_domains (demand, supply, monetary, labor).
+- Include at least one of each mechanism type: always-on, threshold-triggered, interaction-driven, regime-conditional.
+- Vary candidate_horizon_hint (5, 20, 60) across the 8 hypotheses.
+- candidate_proxies must be from the catalog (exact IDs).
+
+We are to output a JSON array of 8 objects.
+
+Let's plan:
+
+1. Always-on trend signal (candidate_trigger = "none", candidate_interactions = false)
+   - Example: FEDFUNDS (monetary) as a trend. But note: we have to be specific. However, note that the example in the few-shot uses "none" for trigger.
+
+2. Threshold-triggered signal (candidate_trigger describes a crossing condition)
+   - Example: UNRATE > 6.0% (but note UNRATE is 6.1 at t-1mo, so we can set a threshold above current level to trigger a signal)
+
+3. Interaction-driven signal (candidate_interactions = true, so at least two proxies)
+   - Example: combination of two series that interact (e.g., FEDFUNDS and CPIAUCSL)
+
+4. Regime-conditional signal (regime_hint is specific, not "any regime")
+   - Example: during a "monetary tightening cycle", but note we have to define the regime.
+
+We must cover at least 3 domains. Let's assign:
+
+- Monetary: FEDFUNDS, CPIAUCSL
+- Demand: GDPC1, RSAFS, HOUST
+- Labor: PAYEMS, UNRATE
+- Supply: INDPRO
+
+We'll aim for:
+
+- Always-on: use one series that is always active (e.g., FEDFUNDS as a trend, but note: we have to be careful because the direction might change with the level). However, the example uses "none" meaning it's always active. But note: the example in the few-shot uses FEDFUNDS as a trend (decline) and sets candidate_trigger="none". So we can have an always-on signal that is a trend (e.g., FEDFUNDS below a certain level? but then it's not always-on). Actually, the example says "a sustained 3-month decline" but then sets candidate_trigger="none". That seems inconsistent. However, the requirement says: "Always-on trend signal (candidate_trigger = "none")". So we can have a signal that is always active (i.e., we always look at the value of the series) but the direction is determined by the level or trend of that series. However, the example in the few-shot uses a trend (decline) but sets trigger to "none". So we interpret "always-on" as the signal is always calculated (no threshold trigger) but the direction of the signal (positive or negative) is determined by the level of the series.
+
+But note: the example says "A sustained 3-month decline" - so the signal is the decline (which is a trend). However, the trigger is set to "none" meaning we are always looking at the decline. So the signal is always active, but the condition for the signal to be positive is that the decline has occurred (which is a condition on the series). So the trigger is not a threshold on the series value but the condition that the series has declined over the past 3 months. But the candidate_trigger field is set to "none" because the condition is built into the signal (i.e., the signal is defined as the 3-month change). So we can have:
+
+candidate_trigger: "none" (meaning we are always computing the signal from the series, and the signal value (positive or negative) will determine the direction)
+
+But note: the example in the few-shot uses candidate_trigger="none" and the mechanism narrative says "a sustained 3-month decline". So the trigger condition is inherent in the signal calculation (the 3-month decline) and not an external threshold. So we set candidate_trigger to "none".
+
+Similarly, for an always-on signal, we can have a signal that is the level of a series (e.g., FEDFUNDS below 2.5%) but then we have to set a threshold in the candidate_trigger? Actually, no: the candidate_trigger is for the condition that must be met to activate the signal. For an always-on signal, we don't require a threshold to activate the signal (the signal is always active), but the signal itself might be positive or negative. However, the problem says: "Always-on trend signal (candidate_trigger = "none")". So we set candidate_trigger to "none".
+
+But note: the example in the few-shot sets candidate_trigger="none" and the mechanism narrative describes a condition (sustained decline). So the condition is part of the signal definition, not a trigger condition. The trigger condition is only for when the signal is active (i.e., when the signal is generated). For an always-on signal, we generate the signal every day, so candidate_trigger is "none".
+
+So for an always-on signal, we can have:
+
+- candidate_proxies: [FEDFUNDS] (but note: we need to define the signal as the change in FEDFUNDS over a period, not the level). However, the problem says: "candidate_proxies" are the series we use. We can use the series to compute a signal (like the change over 3 months). But the candidate_proxies list is just the series we use to compute the signal. So we can have one series and then the signal is computed from it.
+
+But note: the example uses FEDFUNDS as the proxy and the signal is the decline (so the signal is negative when FEDFUNDS declines). So the direction of the signal (positive or negative) is determined by the change in FEDFUNDS.
+
+So for an always-on signal, we set candidate_trigger="none", and the candidate_proxies is the series we use (and we compute the signal from it).
+
+Now, let's design 8 hypotheses.
+
+We need to cover:
+- Always-on: 1
+- Threshold-triggered: 1
+- Interaction-driven: 1
+- Regime-conditional: 1
+
+And the rest can be any of these, but we must have at least one of each.
+
+Also, we must vary the horizon: 5, 20, 60.
+
+We have 8 hypotheses. We'll assign:
+
+H_001: Always-on (trigger: none) -> horizon 20 (since target is 20-day, but note: the candidate_horizon_hint is the suggested horizon for the signal, which might be different from the target. But note: the target is 20-day returns. So we can set candidate_horizon_hint to 20 for the target. However, the problem says: "Suggested prediction horizon in trading days. Corresponds to approximately 1 week (5), 1 month (20), or 1 quarter (60)." So for the target (20-day), we set candidate_horizon_hint=20.
+
+But note: the target is 20-day returns. So we are predicting 20-day returns. Therefore, we set candidate_horizon_hint=20 for the target.
+
+However, for a signal that is computed over a longer period (like 3 months), we might set the candidate_horizon_hint to 60 (quarter) because the signal is built on a 3-month window. But the problem says: "Suggested prediction horizon in trading days". We are predicting 20-day returns, so we set candidate_horizon_hint=20 for the target. But note: the signal might be built on a longer window. The candidate_horizon_hint is the horizon we are predicting (20 days). So we set it to 20 for the target.
+
+But note: the problem says "over what horizon" - meaning the horizon for the return. So we set candidate_horizon_hint=20 for the target.
+
+However, for a signal that is built on a 3-month window, we might set candidate_horizon_hint=60 (quarter) to indicate that the signal is built on a 3-month window and we are predicting a quarter. But the target is 20-day returns. So we are constrained to the 20-day horizon. Therefore, we set candidate_horizon_hint=20 for all.
+
+But the problem says: "Vary candidate_horizon_hint across 5, 20, and 60." So we must have at least one with 5, one with 20, one with 60.
+
+So we will have:
+- 3 with 20 (for the target, but we can also have signals that are built for 60 days and predict 60-day returns? but note: the target is fixed at 20-day returns. However, the problem says: "S&P 500 forward 20-day returns" as the target. So we are only predicting 20-day returns. Therefore, we must set candidate_horizon_hint=20 for all? But the problem says "Vary candidate_horizon_hint across 5, 20, and 60." meaning we are allowed to have different horizons for the signal? But note: the target is fixed at 20-day. So we cannot change the target horizon. However, the candidate_horizon_hint is the suggested horizon for the signal. The problem says: "Suggested prediction horizon in trading days. Corresponds to approximately 1 week (5), 1 month (20), or 1 quarter (60)." So we are allowed to suggest a different horizon? But the target is 20-day. So we are predicting 20-day returns. Therefore, we set candidate_horizon_hint=20 for all. But then we cannot vary it.
+
+Wait, the problem says: "Vary candidate_horizon_hint across 5, 20, and 60." meaning we have to have at least one with 5, one with 20, one with 60. But note: the target is fixed at 20-day returns. So if we set candidate_horizon_hint=5, we are saying that the signal is built for a 5-day horizon, but we are still predicting 20-day returns? That doesn't make sense.
+
+Alternatively, the candidate_horizon_hint is the horizon for which the signal is designed. But the target is fixed at 20-day. So we must set candidate_horizon_hint=20 for the target. However, the problem requires us to vary it. So we must have some hypotheses that are designed for 5-day, 20-day, and 60-day returns? But the target is fixed at 20-day. This is confusing.
+
+Let me re-read: "Target Panel Summary (S&P 500 forward 20-day returns)". So the target is always 20-day. Therefore, we must set candidate_horizon_hint=20 for all. But the problem says "Vary candidate_horizon_hint across 5, 20, and 60." meaning we have to have at least one with 5, one with 20, one with 60. How can we have a signal for 5-day returns when the target is 20-day? We cannot.
+
+Wait, note: the problem says "Suggested prediction horizon in trading days. Corresponds to approximately 1 week (5), 1 month (20), or 1 quarter (60)." So the candidate_horizon_hint is the horizon we are suggesting for the signal. But the target is fixed at 20-day. So we are forced to set candidate_horizon_hint=20 for the target. However, the problem requires us to have at least one with 5, one with 20, one with 60. This is a contradiction.
+
+But note: the problem says "Vary candidate_horizon_hint across 5, 20, and 60." meaning we are to assign these values to the hypotheses. We are not constrained to the target horizon for the candidate_horizon_hint? The candidate_horizon_hint is the horizon we are suggesting for the signal (i.e., the horizon over which the signal is expected to predict). But the target is fixed at 20-day. So we are to design signals that are intended for different horizons? But the target is 20-day. So we are only allowed to predict 20-day returns. Therefore, we must set candidate_horizon_hint=20 for all. But then we cannot vary it.
+
+This is a problem. However, note that the problem says: "The instantiation grid in Phase 2 Workflow E will expand this into specific horizon_grid entries." meaning that the candidate_horizon_hint is a suggestion and the system will consider multiple horizons. But the problem requires us to vary it. So we will set:
+
+- Some hypotheses with candidate_horizon_hint=5 (meaning we are suggesting a 5-day horizon, even though the target is 20-day? but that doesn't make sense). Alternatively, the problem might allow us to have signals for different horizons, but the target is fixed. So we are to design the signal for the horizon we set. But the target is 20-day. So we are to design a signal that predicts 20-day returns, but we are allowed to set candidate_horizon_hint to 5, 20, or 60? That doesn't align.
+
+After re-thinking: the candidate_horizon_hint is the horizon for which the signal is built. For example, a signal built on a 5-day window might be intended for 5-day returns. But the target is 20-day. So we are not going to use a 5-day signal for the 20-day target. Therefore, we must set candidate_horizon_hint=20 for the target. But the problem requires variation. So we must have some hypotheses that are for 5-day, 20-day, and 60-day returns? But the target is fixed at 20-day. This is confusing.
+
+Looking at the problem statement: "Target Panel Summary (S&P 500 forward 20-day returns)". So the target is fixed. Therefore, we must set candidate_horizon_hint=20 for all. But the problem says "Vary candidate_horizon_hint across 5, 20, and 60." meaning we have to have at least one with 5, one with 20, one with 60. How? We can have:
+
+- For the 20-day target, we set candidate_horizon_hint=20.
+- For the other two, we set candidate_horizon_hint=5 and 60, but note: the target is fixed at 20-day. So we are not going to use the 5-day signal for the 20-day target. But the problem doesn't say we have to use the signal for the target. It says: "explaining how macroeconomic signals drive S&P 500 forward returns" (the target is 20-day). So we are only concerned with 20-day returns. Therefore, we must set candidate_horizon_hint=20 for all. But then we cannot satisfy the requirement to vary.
+
+This is a conflict. However, note that the problem says: "Vary candidate_horizon_hint across 5, 20, and 60." meaning we are to assign these values to the hypotheses. So we will assign:
+
+- 3 hypotheses with candidate_horizon_hint=20 (for the target)
+- 3 with 5 and 60? But we have 8 hypotheses. We can have:
+
+  - 3 with 20 (for the target)
+  - 2 with 5 (but then we are not predicting 20-day, so it's inconsistent with the target)
+  - 3 with 60 (same issue)
+
+But note: the problem says "S&P 500 forward 20-day returns" as the target. So we are only to explain the 20-day returns. Therefore, we must set candidate_horizon_hint=20 for all. But the problem requires variation. So we have to break the rule? Or the problem allows us to have signals for different horizons? The problem does not say we are restricted to 20-day for the signal. It says: "explaining how macroeconomic signals drive S&P 500 forward returns" (and the target is 20-day). But the signal might be built for a different horizon. However, the target is fixed. So we are to design signals that are intended for the 20-day horizon. Therefore, we set candidate_horizon_hint=20 for all.
+
+But the problem requires variation. So we must have at least one with 5, one with 20, one with 60. How? We can have:
+
+- For the 20-day target, we set candidate_horizon_hint=20.
+- For the other two, we set candidate_horizon_hint=5 and 60, but then we are not using them for the target. But the problem says: "explaining how macroeconomic signals drive S&P 500 forward returns" (the target is 20-day). So we are only allowed to have signals that are for 20-day. Therefore, we must set candidate_horizon_hint=20 for all.
+
+This is a dilemma. However, note that the problem says: "Vary candidate_horizon_hint across 5, 20, and 60." meaning we are to assign these values to the hypotheses. So we will assign:
+
+- 3 hypotheses with candidate_horizon_hint=20 (for the target)
+- 3 hypotheses with candidate_horizon_hint=5 (even though the target is 20-day, we are to design a signal for 5-day returns? but the target is fixed at 20-day, so this is inconsistent). 
+
+But wait: the problem says "Target Panel Summary (S&P 500 forward 20-day returns)". So the target is 20-day. Therefore, we are only to design signals for 20-day returns. So we must set candidate_horizon_hint=20 for all. But the problem requires variation. So we have to break the rule? Or the problem means that the candidate_horizon_hint is the horizon over which the signal is built (e.g., a signal built on 5 days of data for a 5-day horizon) but then we are not using it for the 20-day target. However, the problem does not say we are restricted to the target horizon for the signal. It says: "explaining how macroeconomic signals drive S&P 500 forward returns" (and the target is 20-day). But the signal might be built for a different horizon. However, the target is fixed. So we are to explain the 20-day returns. Therefore, the signal should be built for the 20-day horizon. So we set candidate_horizon_hint=20.
+
+Given the confusion, I will follow the requirement to vary the candidate_horizon_hint. So we will have:
+
+- 3 hypotheses with candidate_horizon_hint=20 (for the target)
+- 3 hypotheses with candidate_horizon_hint=5 (meaning we are designing a signal for 5-day returns, even though the target is 20-day? but the problem says the target is 20-day, so we are not going to use the 5-day signal for the target. However, the problem does not say we are only to design for the target. It says: "explaining how macroeconomic signals drive S&P 500 forward returns" (and the target is 20-day). But the problem also says: "forward returns" without specifying the horizon? Actually, the target is defined as 20-day. So we are only to explain the 20-day returns. Therefore, we must set candidate_horizon_hint=20 for all. But the problem requires variation. So we have to have some with 5 and 60. This is a problem in the problem statement.
+
+However, note: the problem says "Vary candidate_horizon_hint across 5, 20, and 60." and we have to do it. So we will assign:
+
+- 3 with 20 (for the target)
+- 3 with 5 (even though the target is 20-day, we are to design a signal for 5-day returns? but the target is 20-day, so this is not for the target. But the problem doesn't say we are only to design for the target. It says: "explaining how macroeconomic signals drive S&P 500 forward returns" (and the target is 20-day). So we are to explain the 20-day returns. Therefore, we must have candidate_horizon_hint=20 for all. But then we cannot vary.
+
+After re-reading the problem: "Target Panel Summary (S&P 500 forward 20-day returns)". So the target is 20-day. Therefore, we are to explain the 20-day returns. So the candidate_horizon_hint should be 20. But the problem requires variation. So we must have at least one with 5 and one with 60. How? We can have:
+
+- For the 20-day target, we set candidate_horizon_hint=20.
+- For the other hypotheses, we set candidate_horizon_hint=5 and 60, but then we are not explaining the 20-day returns? We are explaining signals for 5-day and 60-day returns. But the problem says: "explaining how macroeconomic signals drive S&P 500 forward returns" (and the target is 20-day). So we are only to explain the 20-day returns. Therefore, we must have candidate_horizon_hint=20 for all.
+
+Given the instructions, I think the intended interpretation is that the candidate_horizon_hint is the horizon for which the signal is designed, and we are to design signals for different horizons (even though the target is fixed at 20-day, we are to design signals for 5, 20, and 60 days). But the problem says the target is 20-day. So we are to design signals for 5-day, 20-day, and 60-day returns? But the target is fixed at 20-day. This is confusing.
+
+However, note that the problem says: "S&P 500 forward 20-day returns" as the target. So we are only to explain the 20-day returns. Therefore, we must set candidate_horizon_hint=20 for all. But the problem requires variation. So we will have to have some with 5 and 60, and hope that the problem allows it. Or perhaps the problem means that the signal's horizon (the time period over which the signal is built) is different, but the prediction horizon is fixed at 20 days. For example, a signal built on 5 days of data might be used to predict the next 20 days? But that's not standard.
+
+Given the time, I will assume that the problem allows us to set candidate_horizon_hint to 5, 20, or 60, and we are to design the signal for that horizon. So for the 20-day target, we set candidate_horizon_hint=20. For the others, we set 5 and 60, and we are to design signals for 5-day and 60-day returns. But note: the target is fixed at 20-day, so the 5-day and 60-day signals are not for the target. However, the problem doesn't say we are only to design for the target. It says: "explaining how macroeconomic signals drive S&P 500 forward returns" (and the target is 20-day). But it doesn't say we are only to design for the target. It says "forward returns", which could be for any horizon. But the target panel is defined for 20-day. So we are to explain the 20-day returns. Therefore, we must have candidate_horizon_hint=20 for the ones that are for the target. But we are to have 8 hypotheses, and we are to cover the target. So we will have:
+
+- 3 hypotheses with candidate_horizon_hint=20 (for the target)
+- 3 with 5 (for 5-day returns, even though the target is 20-day, we are to design a signal for 5-day returns as well? but the problem doesn't say we can't)
+- 2 with 60 (for 60-day returns)
+
+But the problem says: "Target Panel Summary (S&P 500 forward 20-day returns)". So the target is 20-day. Therefore, the 5-day and 60-day signals are not for the target. But the problem doesn't say we are only to design for the target. It says: "explaining how macroeconomic signals drive S&P 500 forward returns" (plural). So it's okay to have signals for different horizons.
+
+So we will have:
+
+- 3 with 20 (for the target)
+- 3 with 5 (for 5-day returns)
+- 2 with 60 (for 60-day returns)
+
+But note: the problem says "forward returns" without specifying, so it's okay.
+
+Now, let's design the 8 hypotheses.
+
+We need to cover at least 3 domains.
+
+Let's assign domains:
+
+- Monetary: FEDFUNDS, CPIAUCSL
+- Demand: GDPC1, RSAFS, HOUST
+- Labor: PAYEMS, UNRATE
+- Supply: INDPRO
+
+We'll cover:
+
+- Monetary: at least two hypotheses
+- Demand: at least two
+- Labor: at least one
+- Supply: at least one
+
+But we only need 3 domains. So we can have:
+
+- Monetary: 3
+- Demand: 3
+- Labor: 1
+- Supply: 1
+
+But we have 8. Let's list:
+
+H_001: Always-on (trigger: none) -> candidate_interactions=false, candidate_trigger="none"
+  - candidate_proxies: [FEDFUNDS] (monetary)
+  - candidate_horizon_hint: 20 (for the target)
+  - dominant_domain: monetary
+  - direction: we need to decide. If FEDFUNDS is low, then it might be bullish. But note: at t-1mo, FEDFUNDS=2.0. We can say: when FEDFUNDS is below 2.5%, it's bullish. But for always-on, we are not setting a threshold. The signal is the level of FEDFUNDS. But the direction of the signal (positive or negative) is determined by the level. However, the direction field in the hypothesis is the predicted direction of the return. So we have to say: when FEDFUNDS is low, returns are positive. But the signal is always active, so the direction is not fixed. We have to say: a low FEDFUNDS (below a threshold) leads to positive returns. But then it's not always-on in the sense of the signal being always positive; it's conditional on the level. However, the candidate_trigger is "none", so we are not using a threshold to activate the signal. The signal is always active, but the direction of the signal (which we use to predict returns) is determined by the level. But the problem says: "Always-on trend signal" meaning the signal is always active, but the direction of the signal (positive or negative) is what we use to predict returns. So for FEDFUNDS, we might say: when FEDFUNDS is below 2.5%, the signal is positive (meaning returns are positive). But then we have to set a threshold in the mechanism narrative. However, the candidate_trigger is "none", so we cannot have a threshold in the trigger. But the threshold is part of the signal definition, not the trigger. So it's okay.
+
+  But note: the example in the few-shot uses a decline (which is a condition on the series) and sets candidate_trigger="none". So they are not using a threshold for activation, but the signal is defined as the decline. So for FEDFUNDS, we can define the signal as the 3-month change. Then the direction of the signal (positive or negative) is what we use. And the candidate_trigger is "none" because we are always computing the 3-month change.
+
+  So for H_001:
+
+  dominant_domain: monetary
+  mechanism_narrative: "A decline in the federal funds rate over the past 3 months compresses discount rates and increases equity valuations, producing positive S&P 500 returns over the next 20 trading days."
+  direction: "+" (because a decline in FEDFUNDS is bullish)
+  candidate_proxies: ["FEDFUNDS"]
+  candidate_horizon_hint: 20
+  candidate_trigger: "none"
+  candidate_interactions: false
+  evidence_refs: ["series:FEDFUNDS"]
+  regime_hint: "monetary easing cycle"
+  failure_condition: "SPX produces negative 20-day returns in > 60% of instances where FEDFUNDS has declined over the past 3 months (t-test p>0.05 for positive returns)."
+
+  But note: the signal is the decline (so the signal is positive when FEDFUNDS declines). So the direction of the signal is positive when FEDFUNDS declines, and we predict positive returns. So direction is "+".
+
+H_002: Threshold-triggered signal (candidate_trigger describes a crossing condition)
+  - Example: UNRATE > 6.0% (but note UNRATE is 6.1 at t-1mo, so we can set a threshold above 6.0 to trigger a signal when UNRATE is above 6.0%)
+  - But note: we want to predict returns. If UNRATE is high, it might be bearish. So we set: when UNRATE > 6.0%, then returns are negative.
+
+  dominant_domain: labor
+  mechanism_narrative: "When the unemployment rate exceeds 6.0%, it signals a weak labor market that suppresses consumer spending and corporate earnings growth, leading to negative S&P 500 returns over the next 5 trading days."
+  direction: "-"
+  candidate_proxies: ["UNRATE"]
+  candidate_horizon_hint: 5
+  candidate_trigger: "UNRATE > 6.0%"
+  candidate_interactions: false
+  evidence_refs: ["series:UNRATE"]
+  regime_hint: "high unemployment regime"
+  failure_condition: "SPX produces positive 5-day returns in > 60% of instances where UNRATE > 6.0% (t-test p>0.05 for negative returns)."
+
+H_003: Interaction-driven signal (candidate_interactions=true, so at least two proxies)
+  - Example: combination of FEDFUNDS and CPIAUCSL. When FEDFUNDS is rising and CPIAUCSL is rising, it might signal inflationary pressure and tightening, leading to negative returns.
+  - But note: we need to define the interaction. We can say: when FEDFUNDS > 2.5% and CPIAUCSL > 2.2% (but we have to use the actual values at t-1mo: CPIAUCSL=219.181, which is an index, so we need to set a threshold in the index? but the index is 1982-1984=100, so 219.181 is the current value. We can set a threshold like CPIAUCSL > 220? But note: the value is 219.181, so we set a threshold above that.
+
+  However, the problem says: "candidate_trigger" is the condition for activation. For interaction, we don't have a separate trigger, but the interaction is the condition. So we set candidate_trigger to a string that describes the condition for the interaction.
+
+  But note: candidate_interactions=true.
+
+  dominant_domain: monetary (because both are monetary)
+  mechanism_narrative: "A simultaneous rise in the federal funds rate and consumer price index (CPI) signals an inflationary monetary policy tightening cycle, which increases risk aversion and leads to negative S&P 500 returns over the next 60 trading days."
+  direction: "-"
+  candidate_proxies: ["FEDFUNDS", "CPIAUCSL"]
+  candidate_horizon_hint: 60
+  candidate_trigger: "FEDFUNDS > 2.5% AND CPIAUCSL > 220.0"
+  candidate_interactions: true
+  evidence_refs: ["series:FEDFUNDS", "series:CPIAUCSL"]
+  regime_hint: "inflationary tightening cycle"
+  failure_condition: "SPX produces positive 60-day returns in > 60% of instances where FEDFUNDS > 2.5% and CPIAUCSL > 220.0 (t-test p>0.05 for negative returns)."
+
+H_004: Regime-conditional signal (regime_hint is specific)
+  - Example: during a "late-cycle expansion" (which we define as when GDP growth is strong and unemployment is low). But note: we have to use the series. We can use GDPC1 and UNRATE.
+
+  dominant_domain: demand (for GDPC1) and labor (for UNRATE) -> but we'll put dominant_domain as "demand" because GDP is a demand indicator? Actually, GDPC1 is demand. UNRATE is labor. But the mechanism is about the regime, so we'll choose the primary domain as demand.
+
+  mechanism_narrative: "In late-cycle expansion regimes (defined as GDPC1 growth > 2.0% annually and UNRATE < 5.0%), the economy is overheating, leading to a higher probability of monetary tightening and negative equity returns over the next 20 trading days."
+  direction: "-"
+  candidate_proxies: ["GDPC1", "UNRATE"]
+  candidate_horizon_hint: 20
+  candidate_trigger: "none" (because the regime is defined by the conditions, and we are always checking the regime. But note: the regime condition is the trigger. So candidate_trigger should be the condition that defines the regime. But the problem says: for regime-conditional, we set regime_hint to a specific regime. The candidate_trigger might be "none" because the regime is always checked, but the condition is in the mechanism narrative. However, the candidate_trigger field is for the activation condition. For regime-conditional, we want the signal to be active only in that regime. So we set candidate_trigger to the condition that defines the regime.
+
+  But note: the problem says: "Regime-conditional signal (regime_hint is specific, not 'any regime')". So we set candidate_trigger to the condition that must be met for the regime to be active.
+
+  So candidate_trigger: "GDPC1 growth > 2.0% annually AND UNRATE < 5.0%"
+
+  However, note: GDPC1 is quarterly. We have to compute the growth. But the candidate_proxies are the series, and we compute the growth from them.
+
+  candidate_trigger: "GDPC1 > 11800.0 AND UNRATE < 5.0" (but note: GDPC1 value at t-5mo is 11740.3, so we set a threshold above that? But we don't know the growth. Alternatively, we can use the level of GDPC1 to represent growth? But it's a level. We need to compute growth. However, the problem doesn't require us to compute it, just to use the series. So we'll use the level as a proxy for growth? But it's not ideal. Alternatively, we can use the change in GDPC1. But the series is level. So we have to define the growth condition in terms of the level? That's not standard.
+
+  Let's change: we'll use the growth rate. But the series is level. So we have to compute the growth from the level. But the problem says: "candidate_proxies" are the series IDs. We are allowed to compute the growth from the level. So we can set:
+
+  candidate_trigger: "GDPC1 growth > 2.0% (annualized) AND UNRATE < 5.0%"
+
+  But the candidate_trigger field is a string. We can write it as: "GDPC1 growth > 2.0% AND UNRATE < 5.0%"
+
+  However, note: the problem says: "candidate_trigger: 'UNRATE rises > 0.3pp in 3 months', 'FEDFUNDS > 4.5%'". So we can write a condition.
+
+  So:
+
+  candidate_trigger: "GDPC1 growth > 2.0% AND UNRATE < 5.0%"
+
+  But note: GDPC1 is quarterly, so growth is computed quarterly. We are at t-5mo, so we have the last quarter (which is the quarter ending around t-5mo). We can compute the growth from the previous quarter.
+
+  We'll assume we can compute the growth.
+
+  dominant_domain: demand (because GDPC1 is demand, and it's the primary indicator for the regime)
+  mechanism_narrative: "During late-cycle expansion regimes (GDPC1 annualized growth > 2.0% and unemployment rate < 5.0%), the economy is overheating, leading to a higher likelihood of monetary policy tightening and negative S&P 500 returns over the next 20 trading days."
+  direction: "-"
+  candidate_proxies: ["GDPC1", "UNRATE"]
+  candidate_horizon_hint: 20
+  candidate_interactions: true? Because it's a joint condition (both conditions must hold). So candidate_interactions=true.
+
+  But note: the mechanism is defined by the joint condition, so it's interaction-driven. However, we are also classifying it as regime-conditional. The problem says: "Regime-conditional signal (regime_hint is specific, not 'any regime')". So we set candidate_interactions=true because it's a joint condition.
+
+  However, the problem says: "Include at least 1 sketch per mechanism type: ...". So we have to have one interaction-driven. This is interaction-driven.
+
+  So candidate_interactions: true.
+
+  evidence_refs: ["series:GDPC1", "series:UNRATE"]
+  regime_hint: "late-cycle expansion"
+  failure_condition: "SPX produces positive 20-day returns in > 60% of instances where GDPC1 growth > 2.0% and UNRATE < 5.0% (t-test p>0.05 for negative returns)."
+
+H_005: Always-on (but with a different series) -> to cover another domain.
+  - Use CPIAUCSL (monetary) as an always-on signal? But we want to cover demand. Let's use HOUST (demand) as an always-on signal.
+
+  dominant_domain: demand
+  mechanism_narrative: "A sustained increase in housing starts (HOUST) over the past 3 months signals strong consumer demand and economic expansion, leading to positive S&P 500 returns over the next 20 trading days."
+  direction: "+"
+  candidate_proxies: ["HOUST"]
+  candidate_horizon_hint: 20
+  candidate_trigger: "none"
+  candidate_interactions: false
+  evidence_refs: ["series:HOUST"]
+  regime_hint: "expansionary demand cycle"
+  failure_condition: "SPX produces negative 20-day returns in > 60% of instances where HOUST has increased over the past 3 months (t-test p>0.05 for positive returns)."
+
+H_006: Threshold-triggered (with a different series) -> to cover labor.
+  - Use PAYEMS (labor) as a threshold-triggered signal.
+  - Example: when PAYEMS growth is below 0.5% (or a low level), it signals weak labor market and negative returns.
+
+  But note: PAYEMS is monthly. We can set a threshold on the growth.
+
+  candidate_trigger: "PAYEMS growth < 0.5%"
+
+  dominant_domain: labor
+  mechanism_narrative: "When the monthly growth in non-farm payrolls (PAYEMS) falls below 0.5%, it signals a weakening labor market that reduces consumer spending and corporate earnings, leading to negative S&P 500 returns over the next 5 trading days."
+  direction: "-"
+  candidate_proxies: ["PAYEMS"]
+  candidate_horizon_hint: 5
+  candidate_trigger: "PAYEMS growth < 0.5%"
+  candidate_interactions: false
+  evidence_refs: ["series:PAYEMS"]
+  regime_hint: "weak labor market"
+  failure_condition: "SPX produces positive 5-day returns in > 60% of instances where PAYEMS growth < 0.5% (t-test p>0.05 for negative returns)."
+
+H_007: Interaction-driven (with two series from different domains) -> to cover supply and demand? But we need to cover at least 3 domains. We have covered monetary, demand, labor. We need to cover supply? But we have INDPRO (supply). Let's use INDPRO and CPIAUCSL for an interaction.
+
+  dominant_domain: supply (because INDPRO is supply, and it's the primary for the mechanism? But the interaction is between supply and monetary. We'll put dominant_domain as "supply" because INDPRO is the supply series.
+
+  mechanism_narrative: "A simultaneous decline in industrial production (INDPRO) and rise in CPI (CPIAUCSL) signals a supply shock that increases inflation and reduces corporate margins, leading to negative S&P 500 returns over the next 60 trading days."
+  direction: "-"
+  candidate_proxies: ["INDPRO", "CPIAUCSL"]
+  candidate_horizon_hint: 60
+  candidate_trigger: "none" (because the signal is always active, but the interaction condition is the joint condition. However, for interaction-driven, we set candidate_trigger to the condition that activates the signal. But note: the signal is defined by the interaction, so the condition is the interaction. But the candidate_trigger field is for the condition that must be met to activate the signal. So we set candidate_trigger to the condition: "INDPRO < 110.0 AND CPIAUCSL > 220.0" (using the current values: INDPRO=110.3034, so we set a threshold below 110.3034? But note: we want a decline, so we set a threshold below the current level? But the current level is 110.3034, so we set INDPRO < 110.0. And CPIAUCSL is 219.181, so we set CPIAUCSL > 220.0.
+
+  However, note: the current CPIAUCSL is 219.181, so >220.0 is above current. But we want a rise, so we set CPIAUCSL > 220.0.
+
+  candidate_trigger: "INDPRO < 110.0 AND CPIAUCSL > 220.0"
+  candidate_interactions: true
+  evidence_refs: ["series:INDPRO", "series:CPIAUCSL"]
+  regime_hint: "supply shock inflation regime"
+  failure_condition: "SPX produces positive 60-day returns in > 60% of instances where INDPRO < 110.0 and CPIAUCSL > 220.0 (t-test p>0.05 for negative returns)."
+
+H_008: We need one more. We have covered:
+  H_001: monetary (always-on)
+  H_002: labor (threshold)
+  H_003: monetary (interaction)
+  H_004: demand (regime-conditional, which is also interaction-driven)
+  H_005: demand (always-on)
+  H_006: labor (threshold)
+  H_007: supply (interaction)
+
+We have covered 4 domains. We need to cover at least 3, so we are good.
+
+But note: we have two always-on (H_001 and H_005), two threshold (H_002 and H_006), two interaction (H_003 and H_007), and one regime-conditional (H_004). But H_004 is also interaction-driven. So we have:
+
+- Always-on: 2 (H_001, H_005)
+- Threshold: 2 (H_002, H_006)
+- Interaction: 3 (H_003, H_004, H_007) -> but note: H_004 is regime-conditional and interaction-driven. We have covered the requirement for interaction-driven.
+
+We have:
+
+- H_001: always-on (monetary)
+- H_002: threshold (labor)
+- H_003: interaction (monetary)
+- H_004: regime-conditional (demand) and interaction-driven
+- H_005: always-on (demand)
+- H_006: threshold (labor)
+- H_007: interaction (supply)
+- H_008: we need one more. We have 8. We have 7. So we need one more.
+
+We'll make H_008: a threshold-triggered signal for supply? But we have INDPRO. However, we already have an interaction with INDPRO. Let's do a threshold for INDPRO.
+
+H_008: Threshold-triggered for supply.
+  dominant_domain: supply
+  mechanism_narrative: "When industrial production (INDPRO) falls below 110.0, it signals a contraction in manufacturing and weak economic activity, leading to negative S&P 500 returns over the next 5 trading days."
+  direction: "-"
+  candidate_proxies: ["INDPRO"]
+  candidate_horizon_hint: 5
+  candidate_trigger: "INDPRO < 110.0"
+  candidate_interactions: false
+  evidence_refs: ["series:INDPRO"]
+  regime_hint: "manufacturing contraction"
+  failure_condition: "SPX produces positive 5-day returns in > 60% of instances where INDPRO < 110.0 (t-test p>0.05 for negative returns)."
+
+But note: we have to cover at least 3 domains. We have monetary, demand, labor, supply. So we are good.
+
+Now, let's assign the horizon:
+
+We need to have at least one with 5, one with 20, one with 60.
+
+We have:
+
+- 20: H_001, H_004, H_005
+- 5: H_002, H_006, H_008
+- 60: H_003, H_007
+
+So we have:
+
+- 5: H_002, H_006, H_008 (three with 5)
+- 20: H_001, H_004, H_005 (three with 20)
+- 60: H_003, H_007 (two with 60)
+
+But we have 8. So:
+
+H_001: 20
+H_002: 5
+H_003: 60
+H_004: 20
+H_005: 20
+H_006: 5
+H_007: 60
+H_008: 5
+
+Now, we must write the JSON.
+
+Note: The failure_condition must be specific and falsifiable.
+
+Let's write each one.
+
+H_001:
+  hypothesis_id: "H_001"
+  dominant_domain: "monetary"
+  mechanism_narrative: "A decline in the federal funds rate over the past 3 months compresses discount rates and increases equity valuations, producing positive S&P 500 returns over the next 20 trading days."
+  direction: "+"
+  candidate_proxies: ["FEDFUNDS"]
+  candidate_horizon_hint: 20
+  candidate_trigger: "none"
+  candidate_interactions: false
+  evidence_refs: ["series:FEDFUNDS"]
+  regime_hint: "monetary easing cycle"
+  failure_condition: "SPX produces negative 20-day returns in > 60% of instances where FEDFUNDS has declined over the past 3 months (t-test p>0.05 for positive returns)."
+
+H_002:
+  hypothesis_id: "H_002"
+  dominant_domain: "labor"
+  mechanism_narrative: "When the unemployment rate exceeds 6.0%, it signals a weak labor market that suppresses consumer spending and corporate earnings growth, leading to negative S&P 500 returns over the next 5 trading days."
+  direction: "-"
+  candidate_proxies: ["UNRATE"]
+  candidate_horizon_hint: 5
+  candidate_trigger: "UNRATE > 6.0%"
+  candidate_interactions: false
+  evidence_refs: ["series:UNRATE"]
+  regime_hint: "high unemployment regime"
+  failure_condition: "SPX produces positive 5-day returns in > 60% of instances where UNRATE > 6.0% (t-test p>0.05 for negative returns)."
+
+H_003:
+  hypothesis_id: "H_003"
+  dominant_domain: "monetary"
+  mechanism_narrative: "A simultaneous rise in the federal funds rate and consumer price index (CPI) signals an inflationary monetary policy tightening cycle, which increases risk aversion and leads to negative S&P 500 returns over the next 60 trading days."
+  direction: "-"
+  candidate_proxies: ["FEDFUNDS", "CPIAUCSL"]
+  candidate_horizon_hint: 60
+  candidate_trigger: "FEDFUNDS > 2.5% AND CPIAUCSL > 220.0"
+  candidate_interactions: true
+  evidence_refs: ["series:FEDFUNDS", "series:CPIAUCSL"]
+  regime_hint: "inflationary tightening cycle"
+  failure_condition: "SPX produces positive 60-day returns in > 60% of instances where FEDFUNDS > 2.5% and CPIAUCSL > 220.0 (t-test p>0.05 for negative returns)."
+
+H_004:
+  hypothesis_id: "H_004"
+  dominant_domain: "demand"
+  mechanism_narrative: "During late-cycle expansion regimes (GDPC1 annualized growth > 2.0% and unemployment rate < 5.0%), the economy is overheating, leading to a higher likelihood of monetary policy tightening and negative S&P 500 returns over the next 20 trading days."
+  direction: "-"
+  candidate_proxies: ["GDPC1", "UNRATE"]
+  candidate_horizon_hint: 20
+  candidate_trigger: "GDPC1 growth > 2.0% AND UNRATE < 5.0%"
+  candidate_interactions: true
+  evidence_refs: ["series:GDPC1", "series:UNRATE"]
+  regime_hint: "late-cycle expansion"
+  failure_condition: "SPX produces positive 20-day returns in > 60% of instances where GDPC1 growth > 2.0% and UNRATE < 5.0% (t-test p>0.05 for negative returns)."
+
+H_005:
+  hypothesis_id: "H_005"
+  dominant_domain: "demand"
+  mechanism_narrative: "A sustained increase in housing starts (HOUST) over the past 3 months signals strong consumer demand and economic expansion, leading to positive S&P 500 returns over the next 20 trading days."
+  direction: "+"
+  candidate_proxies: ["HOUST"]
+  candidate_horizon_hint: 20
+  candidate_trigger: "none"
+  candidate_interactions: false
+  evidence_refs: ["series:HOUST"]
+  regime_hint: "expansionary demand cycle"
+  failure_condition: "SPX produces negative 20-day returns in > 60% of instances where HOUST has increased over the past 3 months (t-test p>0.05 for positive returns)."
+
+H_006:
+  hypothesis_id: "H_006"
+  dominant_domain: "labor"
+  mechanism_narrative: "When the monthly growth in non-farm payrolls (PAYEMS) falls below 0.5%, it signals a weakening labor market that reduces consumer spending and corporate earnings, leading to negative S&P 500 returns over the next 5 trading days."
+  direction: "-"
+  candidate_proxies: ["PAYEMS"]
+  candidate_horizon_hint: 5
+  candidate_trigger: "PAYEMS growth < 0.5%"
+  candidate_interactions: false
+  evidence_refs: ["series:PAYEMS"]
+  regime_hint: "weak labor market"
+  failure_condition: "SPX produces positive 5-day returns in > 60% of instances where PAYEMS growth < 0.5% (t-test p>0.05 for negative returns)."
+
+H_007:
+  hypothesis_id: "H_007"
+  dominant_domain: "supply"
+  mechanism_narrative: "A simultaneous decline in industrial production (INDPRO) and rise in CPI (CPIAUCSL) signals a supply shock that increases inflation and reduces corporate margins, leading to negative S&P 500 returns over the next 60 trading days."
+  direction: "-"
+  candidate_proxies: ["INDPRO", "CPIAUCSL"]
+  candidate_horizon_hint: 60
+  candidate_trigger: "INDPRO < 110.0 AND CPIAUCSL > 220.0"
+  candidate_interactions: true
+  evidence_refs: ["series:INDPRO", "series:CPIAUCSL"]
+  regime_hint: "supply shock inflation regime"
+  failure_condition: "SPX produces positive 60-day returns in > 60% of instances where INDPRO < 110.0 and CPIAUCSL > 220.0 (t-test p>0.05 for negative returns)."
+
+H_008:
+  hypothesis_id: "H_008"
+  dominant_domain: "supply"
+  mechanism_narrative: "When industrial production (INDPRO) falls below 110.0, it signals a contraction in manufacturing and weak economic activity, leading to negative S&P 500 returns over the next 5 trading days."
+  direction: "-"
+  candidate_proxies: ["INDPRO"]
+  candidate_horizon_hint: 5
+  candidate_trigger: "INDPRO < 110.0"
+  candidate_interactions: false
+  evidence_refs: ["series:INDPRO"]
+  regime_hint: "manufacturing contraction"
+  failure_condition: "SPX produces positive 5-day returns in > 60% of instances where INDPRO < 110.0 (t-test p>0.05 for negative returns)."
+
+Now, check the requirements:
+
+- Cover at least 3 domains: we have monetary, demand, labor, supply -> 4 domains.
+- Mechanism types:
+  - Always-on: H_001, H_005
+  - Threshold-triggered: H_002, H_006, H_008
+  - Interaction-driven: H_003, H_004, H_007
+  - Regime-conditional: H_004 (and note: H_004 is also interaction-driven, but it is regime-conditional because regime_hint is specific)
+  So we have at least one of each.
+
+- Vary horizon: 5, 20, 60 -> we have examples of all.
+
+- candidate_proxies: all from the catalog.
+
+Now, write as JSON array.
+
+Note: The failure_condition must be specific. We have written them as required.
+
+Let's output the JSON array.
+
+Note: The problem says "Nothing else - no prose, no markdown fences, no commentary."
+
+So we output:
+
+[
+  {
+    "hypothesis_id": "H_001",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "A decline in the federal funds rate over the past 3 months compresses discount rates and increases equity valuations, producing positive S&P 500 returns over the next 20 trading days.",
+    "direction": "+",
+    "candidate_proxies": ["FEDFUNDS"],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": ["series:FEDFUNDS"],
+    "regime_hint": "monetary easing cycle",
+    "failure_condition": "SPX produces negative 20-day returns in > 60% of instances where FEDFUNDS has declined over the past 3 months (t-test p>0.05 for positive returns)."
+  },
+  ... and so on for all 8.
+]
+
+But note: the failure_condition must be at least 20 characters. Our conditions are longer than 20.
+
+Now, write the JSON.
+
+Important: The candidate_interactions must be boolean (true/false), not string.
+
+Let's write the JSON.
+</think>
+
+[
+  {
+    "hypothesis_id": "H_001",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "A decline in the federal funds rate over the past 3 months compresses discount rates and increases equity valuations, producing positive S&P 500 returns over the next 20 trading days.",
+    "direction": "+",
+    "candidate_proxies": [
+      "FEDFUNDS"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:FEDFUNDS"
+    ],
+    "regime_hint": "monetary easing cycle",
+    "failure_condition": "SPX produces negative 20-day returns in > 60% of instances where FEDFUNDS has declined over the past 3 months (t-test p>0.05 for positive returns)."
+  },
+  {
+    "hypothesis_id": "H_002",
+    "dominant_domain": "labor",
+    "mechanism_narrative": "When the unemployment rate exceeds 6.0%, it signals a weak labor market that suppresses consumer spending and corporate earnings growth, leading to negative S&P 500 returns over the next 5 trading days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "UNRATE"
+    ],
+    "candidate_horizon_hint": 5,
+    "candidate_trigger": "UNRATE > 6.0%",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:UNRATE"
+    ],
+    "regime_hint": "high unemployment regime",
+    "failure_condition": "SPX produces positive 5-day returns in > 60% of instances where UNRATE > 6.0% (t-test p>0.05 for negative returns)."
+  },
+  {
+    "hypothesis_id": "H_003",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "A simultaneous rise in the federal funds rate and consumer price index (CPI) signals an inflationary monetary policy tightening cycle, which increases risk aversion and leads to negative S&P 500 returns over the next 60 trading days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "FEDFUNDS",
+      "CPIAUCSL"
+    ],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "FEDFUNDS > 2.5% AND CPIAUCSL > 220.0",
+    "candidate_interactions": true,
+    "evidence_refs": [
+      "series:FEDFUNDS",
+      "series:CPIAUCSL"
+    ],
+    "regime_hint": "inflationary tightening cycle",
+    "failure_condition": "SPX produces positive 60-day returns in > 60% of instances where FEDFUNDS > 2.5% and CPIAUCSL > 220.0 (t-test p>0.05 for negative returns)."
+  },
+  {
+    "hypothesis_id": "H_004",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "During late-cycle expansion regimes (GDPC1 annualized growth > 2.0% and unemployment rate < 5.0%), the economy is overheating, leading to a higher likelihood of monetary policy tightening and negative S&P 500 returns over the next 20 trading days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "GDPC1",
+      "UNRATE"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "GDPC1 growth > 2.0% AND UNRATE < 5.0%",
+    "candidate_interactions": true,
+    "evidence_refs": [
+      "series:GDPC1",
+      "series:UNRATE"
+    ],
+    "regime_hint": "late-cycle expansion",
+    "failure_condition": "SPX produces positive 20-day returns in > 60% of instances where GDPC1 growth > 2.0% and UNRATE < 5.0% (t-test p>0.05 for negative returns)."
+  },
+  {
+    "hypothesis_id": "H_005",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "A sustained increase in housing starts (HOUST) over the past 3 months signals strong consumer demand and economic expansion, leading to positive S&P 500 returns over the next 20 trading days.",
+    "direction": "+",
+    "candidate_proxies": [
+      "HOUST"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:HOUST"
+    ],
+    "regime_hint": "expansionary demand cycle",
+    "failure_condition": "SPX produces negative 20-day returns in > 60% of instances where HOUST has increased over the past 3 months (t-test p>0.05 for positive returns)."
+  },
+  {
+    "hypothesis_id": "H_006",
+    "dominant_domain": "labor",
+    "mechanism_narrative": "When the monthly growth in non-farm payrolls (PAYEMS) falls below 0.5%, it signals a weakening labor market that reduces consumer spending and corporate earnings, leading to negative S&P 500 returns over the next 5 trading days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "PAYEMS"
+    ],
+    "candidate_horizon_hint": 5,
+    "candidate_trigger": "PAYEMS growth < 0.5%",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:PAYEMS"
+    ],
+    "regime_hint": "weak labor market",
+    "failure_condition": "SPX produces positive 5-day returns in > 60% of instances where PAYEMS growth < 0.5% (t-test p>0.05 for negative returns)."
+  },
+  {
+    "hypothesis_id": "H_007",
+    "dominant_domain": "supply",
+    "mechanism_narrative": "A simultaneous decline in industrial production (INDPRO) and rise in CPI (CPIAUCSL) signals a supply shock that increases inflation and reduces corporate margins, leading to negative S&P 500 returns over the next 60 trading days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "INDPRO",
+      "CPIAUCSL"
+    ],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "INDPRO < 110.0 AND CPIAUCSL > 220.0",
+    "candidate_interactions": true,
+    "evidence_refs": [
+      "series:INDPRO",
+      "series:CPIAUCSL"
+    ],
+    "regime_hint": "supply shock inflation regime",
+    "failure_condition": "SPX produces positive 60-day returns in > 60% of instances where INDPRO < 110.0 and CPIAUCSL > 220.0 (t-test p>0.05 for negative returns)."
+  },
+  {
+    "hypothesis_id": "H_008",
+    "dominant_domain": "supply",
+    "mechanism_narrative": "When industrial production (INDPRO) falls below 110.0, it signals a contraction in manufacturing and weak economic activity, leading to negative S&P 500 returns over the next 5 trading days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "INDPRO"
+    ],
+    "candidate_horizon_hint": 5,
+    "candidate_trigger": "INDPRO < 110.0",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:INDPRO"
+    ],
+    "regime_hint": "manufacturing contraction",
+    "failure_condition": "SPX produces positive 5-day returns in > 60% of instances where INDPRO < 110.0 (t-test p>0.05 for negative returns)."
+  }
+]

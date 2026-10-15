@@ -1,0 +1,329 @@
+We are generating 8 hypothesis sketches for the S&P 500 forward 20-day returns, based on the macro series available (from the observable catalog) and the decision time point (2015-11-15). We must use exactly the series IDs from the catalog.
+
+Constraints:
+- 8 hypotheses, IDs H_001 to H_008.
+- Cover at least 3 different dominant_domains (demand, supply, monetary, labor).
+- Include at least one of each mechanism type: always-on, threshold-triggered, interaction-driven, regime-conditional.
+- Vary candidate_horizon_hint: 5, 20, 60 (but note: the target is 20-day, so 20 is the natural horizon, but we can have 5 and 60 as well for variation).
+- candidate_proxies must be from the available series (GDPC1, CPIAUCSL, PAYEMS, INDPRO, RSAFS, UNRATE, HOUST, FEDFUNDS).
+- candidate_interactions: true if multiple proxies are used (and the mechanism requires their joint behavior), false otherwise.
+
+We are to output a JSON array of 8 objects.
+
+Let's plan:
+
+1. We need to cover at least 3 domains. We have 4 domains: demand, supply, monetary, labor. We'll use at least 3 of them.
+
+2. Mechanism types:
+   - Always-on: candidate_trigger = "none", candidate_interactions = false (e.g., a single series trend)
+   - Threshold-triggered: candidate_trigger describes a condition (e.g., "FEDFUNDS > 4.5%"), candidate_interactions = false (if single series) or true (if multiple but the condition is on one series and the interaction is the joint effect of multiple series? Actually, note: the requirement says for threshold-triggered, it's a condition that must be met. For interaction-driven, candidate_interactions must be true and at least two proxies. So we can have:
+        Type A: Always-on (trigger = "none", interactions = false)
+        Type B: Threshold-triggered (trigger = condition, interactions = false) - single series threshold
+        Type C: Interaction-driven (interactions = true, so at least two proxies, and the condition might be on one of them or a joint condition)
+        Type D: Regime-conditional (regime_hint is specific, e.g., "monetary tightening cycle", and it might be always-on in that regime, but the trigger might be the regime itself)
+
+But note: the requirement says "Include at least 1 sketch per mechanism type", meaning we must have at least one of each of the four types.
+
+So we'll assign:
+
+Type 1: Always-on (H_001)
+Type 2: Threshold-triggered (H_002)
+Type 3: Interaction-driven (H_003)
+Type 4: Regime-conditional (H_004)
+
+Then the rest (H_005 to H_008) can be variations.
+
+We also need to vary the horizon: 5, 20, 60. We'll assign:
+
+- Horizon 5: for short-term signals (e.g., H_001, H_002)
+- Horizon 20: for the main target (H_003, H_004)
+- Horizon 60: for longer-term (H_005, H_006)
+
+But note: the target is 20-day, so we can have some at 20, but the horizon hint is just a suggestion (the actual horizon in the model might be 20, but the hint can be 5, 20, or 60). We'll use all three.
+
+Now, let's create 8 hypotheses:
+
+H_001: Always-on, single series, horizon 5 (short-term)
+  - dominant_domain: monetary (using FEDFUNDS)
+  - mechanism: A decline in the federal funds rate (FEDFUNDS) is associated with positive 5-day returns because it signals accommodative monetary policy that boosts equity valuations.
+  - direction: "+"
+  - candidate_proxies: ["FEDFUNDS"]
+  - candidate_trigger: "none"
+  - candidate_interactions: false
+  - evidence_refs: ["series:FEDFUNDS"]
+  - regime_hint: "monetary easing"
+  - failure_condition: "SPX 5-day returns are negative in > 60% of periods when FEDFUNDS declines."
+
+H_002: Threshold-triggered, single series, horizon 20
+  - dominant_domain: monetary
+  - mechanism: When the federal funds rate (FEDFUNDS) falls below 0.25% (a threshold indicating aggressive easing), it triggers positive 20-day S&P 500 returns due to the expectation of sustained low rates.
+  - direction: "+"
+  - candidate_proxies: ["FEDFUNDS"]
+  - candidate_trigger: "FEDFUNDS < 0.25%"
+  - candidate_interactions: false
+  - evidence_refs: ["series:FEDFUNDS"]
+  - regime_hint: "extreme monetary easing"
+  - failure_condition: "20-day returns are negative in > 50% of instances when FEDFUNDS is below 0.25%."
+
+H_003: Interaction-driven (two series), horizon 20
+  - dominant_domain: demand (using two demand series: GDP and housing)
+  - mechanism: A simultaneous decline in GDP growth (GDPC1) and housing starts (HOUST) indicates a deepening economic slowdown, which leads to negative 20-day S&P 500 returns as investors anticipate reduced corporate earnings.
+  - direction: "-"
+  - candidate_proxies: ["GDPC1", "HOUST"]
+  - candidate_trigger: "none" (but note: the interaction is the joint behavior, so trigger is always on? Actually, the condition for the interaction is the joint decline, so we can set trigger to "none" but the mechanism is interaction-driven. However, the requirement for interaction-driven is candidate_interactions=true. We can set candidate_trigger to "none" because the signal is the joint behavior of the two series, not a threshold on one. But note: the failure condition must be specific.
+  - candidate_interactions: true
+  - evidence_refs: ["series:GDPC1", "series:HOUST"]
+  - regime_hint: "economic contraction"
+  - failure_condition: "The correlation between GDPC1 and HOUST declines below -0.5 in the same period, or 20-day returns are positive in > 40% of joint decline events."
+
+H_004: Regime-conditional, single series, horizon 60
+  - dominant_domain: labor
+  - mechanism: In a high-unemployment regime (UNRATE > 5.5%), a decline in the unemployment rate (UNRATE) signals a strengthening labor market, which leads to positive 60-day S&P 500 returns as corporate profits improve.
+  - direction: "+"
+  - candidate_proxies: ["UNRATE"]
+  - candidate_trigger: "none" (but the regime is conditional on UNRATE being above 5.5%, so the trigger for the regime is the high unemployment, but the signal is the decline in UNRATE. However, the candidate_trigger field is for the activation condition of the signal. We can set candidate_trigger to "UNRATE > 5.5%" to indicate the regime, and then the signal is the decline. But note: the requirement for regime-conditional is that the regime_hint is specific. We'll set candidate_trigger to "UNRATE > 5.5" to activate the signal, and then the mechanism is the decline in UNRATE. However, the mechanism is conditional on the regime (high unemployment) and the signal is the decline. So candidate_trigger: "UNRATE > 5.5" (meaning the regime condition must hold for the signal to be active). Then the mechanism is: when UNRATE is above 5.5 and then declines, we get positive returns.
+  - candidate_interactions: false
+  - evidence_refs: ["series:UNRATE"]
+  - regime_hint: "high unemployment regime"
+  - failure_condition: "In periods when UNRATE > 5.5, a decline in UNRATE is followed by negative 60-day returns in > 50% of cases."
+
+H_005: Always-on, but in a different domain (labor), horizon 20
+  - dominant_domain: labor
+  - mechanism: A rising employment level (PAYEMS) is associated with positive 20-day S&P 500 returns as it signals a strengthening economy and higher consumer spending.
+  - direction: "+"
+  - candidate_proxies: ["PAYEMS"]
+  - candidate_trigger: "none"
+  - candidate_interactions: false
+  - evidence_refs: ["series:PAYEMS"]
+  - regime_hint: "labor market expansion"
+  - failure_condition: "20-day returns are negative in > 40% of periods when PAYEMS rises."
+
+H_006: Threshold-triggered, in supply domain, horizon 5
+  - dominant_domain: supply
+  - mechanism: When industrial production (INDPRO) falls below 100 (a threshold indicating contraction), it triggers negative 5-day S&P 500 returns due to concerns about manufacturing slowdown.
+  - direction: "-"
+  - candidate_proxies: ["INDPRO"]
+  - candidate_trigger: "INDPRO < 100"
+  - candidate_interactions: false
+  - evidence_refs: ["series:INDPRO"]
+  - regime_hint: "manufacturing contraction"
+  - failure_condition: "5-day returns are positive in > 50% of instances when INDPRO < 100."
+
+H_007: Interaction-driven (two series), horizon 20, in demand domain
+  - dominant_domain: demand
+  - mechanism: A simultaneous decline in consumer price inflation (CPIAUCSL) and residential fixed investment (RSAFS) indicates a weakening demand environment, leading to negative 20-day S&P 500 returns as corporate revenue growth slows.
+  - direction: "-"
+  - candidate_proxies: ["CPIAUCSL", "RSAFS"]
+  - candidate_interactions: true
+  - candidate_trigger: "none" (the signal is the joint decline, so the trigger is the joint condition, but we don't have a threshold for the joint condition? Actually, we can set candidate_trigger to "none" because the interaction is the joint behavior. However, the failure condition must be specific.)
+  - evidence_refs: ["series:CPIAUCSL", "series:RSAFS"]
+  - regime_hint: "demand contraction"
+  - failure_condition: "The joint decline in CPIAUCSL and RSAFS is followed by positive 20-day returns in > 40% of cases."
+
+H_008: Regime-conditional, in monetary domain, horizon 60
+  - dominant_domain: monetary
+  - mechanism: In a high-inflation regime (CPIAUCSL > 3%), a rise in the federal funds rate (FEDFUNDS) triggers negative 60-day S&P 500 returns as it signals tightening monetary policy.
+  - direction: "-"
+  - candidate_proxies: ["FEDFUNDS"]
+  - candidate_trigger: "CPIAUCSL > 3%"
+  - candidate_interactions: false
+  - evidence_refs: ["series:CPIAUCSL", "series:FEDFUNDS"]
+  - regime_hint: "high inflation environment"
+  - failure_condition: "In periods when CPIAUCSL > 3%, a rise in FEDFUNDS is followed by positive 60-day returns in > 50% of cases."
+
+Now, let's check the requirements:
+
+- Domains covered: 
+  H_001: monetary
+  H_002: monetary
+  H_003: demand
+  H_004: labor
+  H_005: labor
+  H_006: supply
+  H_007: demand
+  H_008: monetary
+
+So we have at least 3 domains (demand, supply, monetary, labor) - actually 4.
+
+- Mechanism types:
+  H_001: always-on
+  H_002: threshold-triggered
+  H_003: interaction-driven
+  H_004: regime-conditional (because regime_hint is specific: "high unemployment regime")
+  H_005: always-on
+  H_006: threshold-triggered
+  H_007: interaction-driven
+  H_008: regime-conditional
+
+So we have at least one of each.
+
+- Horizon: 
+  H_001: 5
+  H_002: 20
+  H_003: 20
+  H_004: 60
+  H_005: 20
+  H_006: 5
+  H_007: 20
+  H_008: 60
+
+So we have 5, 20, 60.
+
+Now, we must write each with the required fields.
+
+Note: The failure condition must be specific and falsifiable.
+
+Let's write each hypothesis in the required JSON format.
+
+Important: The candidate_proxies must be exactly from the catalog, and we are using the series IDs as given.
+
+We'll write the 8 hypotheses.
+
+Note: The example in the few-shot uses "H_000", but we are using H_001 to H_008.
+
+Let's create the JSON array.
+</think>
+
+[
+  {
+    "hypothesis_id": "H_001",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "A sustained decline in the federal funds rate (FEDFUNDS) signals aggressive monetary easing, reducing discount rates for equity valuation and producing positive 5-day S&P 500 returns as investors anticipate accommodative policy support.",
+    "direction": "+",
+    "candidate_proxies": [
+      "FEDFUNDS"
+    ],
+    "candidate_horizon_hint": 5,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:FEDFUNDS"
+    ],
+    "regime_hint": "monetary easing cycle",
+    "failure_condition": "5-day forward returns are negative in > 60% of periods when FEDFUNDS declines, or the Rank IC falls below 0.02 over any 1-year rolling window."
+  },
+  {
+    "hypothesis_id": "H_002",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "When FEDFUNDS drops below 0.25%, it triggers aggressive monetary policy expectations that compress equity discount rates, generating positive 20-day S&P 500 returns due to sustained low-rate environment.",
+    "direction": "+",
+    "candidate_proxies": [
+      "FEDFUNDS"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "FEDFUNDS < 0.25%",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:FEDFUNDS"
+    ],
+    "regime_hint": "emergency rate easing",
+    "failure_condition": "20-day returns are negative in > 50% of instances when FEDFUNDS < 0.25%, or the signal correlation with returns drops below 0.15 in 3-year rolling windows."
+  },
+  {
+    "hypothesis_id": "H_003",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "Simultaneous declines in GDP growth (GDPC1) and housing starts (HOUST) indicate accelerating economic contraction, reducing corporate earnings expectations and producing negative 20-day S&P 500 returns.",
+    "direction": "-",
+    "candidate_proxies": [
+      "GDPC1",
+      "HOUST"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": true,
+    "evidence_refs": [
+      "series:GDPC1",
+      "series:HOUST"
+    ],
+    "regime_hint": "deepening recession",
+    "failure_condition": "The joint decline in GDPC1 and HOUST is followed by positive 20-day returns in > 40% of cases, or the interaction correlation with returns falls below -0.25."
+  },
+  {
+    "hypothesis_id": "H_004",
+    "dominant_domain": "labor",
+    "mechanism_narrative": "In high-unemployment regimes (UNRATE > 5.5%), a decline in unemployment rate (UNRATE) signals labor market strengthening, boosting consumer spending and corporate profits to generate positive 60-day S&P 500 returns.",
+    "direction": "+",
+    "candidate_proxies": [
+      "UNRATE"
+    ],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "UNRATE > 5.5",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:UNRATE"
+    ],
+    "regime_hint": "high unemployment regime",
+    "failure_condition": "60-day returns are negative in > 50% of periods when UNRATE > 5.5 and declines, or the regime-specific return differential is statistically insignificant (p > 0.05)."
+  },
+  {
+    "hypothesis_id": "H_005",
+    "dominant_domain": "labor",
+    "mechanism_narrative": "A rising employment level (PAYEMS) indicates expanding labor market conditions, increasing consumer income and spending capacity to drive positive 20-day S&P 500 returns.",
+    "direction": "+",
+    "candidate_proxies": [
+      "PAYEMS"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:PAYEMS"
+    ],
+    "regime_hint": "labor market expansion",
+    "failure_condition": "20-day returns are negative in > 40% of periods when PAYEMS rises, or the signal correlation with returns falls below 0.10."
+  },
+  {
+    "hypothesis_id": "H_006",
+    "dominant_domain": "supply",
+    "mechanism_narrative": "When industrial production (INDPRO) falls below 100, it signals manufacturing contraction, reducing corporate output and earnings growth to produce negative 5-day S&P 500 returns.",
+    "direction": "-",
+    "candidate_proxies": [
+      "INDPRO"
+    ],
+    "candidate_horizon_hint": 5,
+    "candidate_trigger": "INDPRO < 100",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:INDPRO"
+    ],
+    "regime_hint": "manufacturing slowdown",
+    "failure_condition": "5-day returns are positive in > 50% of instances when INDPRO < 100, or the signal's predictive power (Rank IC) remains below 0.05."
+  },
+  {
+    "hypothesis_id": "H_007",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "Simultaneous declines in CPI inflation (CPIAUCSL) and residential investment (RSAFS) indicate weakening consumer demand, reducing corporate revenue growth and triggering negative 20-day S&P 500 returns.",
+    "direction": "-",
+    "candidate_proxies": [
+      "CPIAUCSL",
+      "RSAFS"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": true,
+    "evidence_refs": [
+      "series:CPIAUCSL",
+      "series:RSAFS"
+    ],
+    "regime_hint": "demand contraction",
+    "failure_condition": "The joint decline in CPIAUCSL and RSAFS is followed by positive 20-day returns in > 40% of cases, or the interaction effect size drops below -0.15."
+  },
+  {
+    "hypothesis_id": "H_008",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "In high-inflation regimes (CPIAUCSL > 3%), a rise in FEDFUNDS signals aggressive monetary tightening, increasing discount rates and reducing equity valuations to produce negative 60-day S&P 500 returns.",
+    "direction": "-",
+    "candidate_proxies": [
+      "FEDFUNDS"
+    ],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "CPIAUCSL > 3%",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:CPIAUCSL",
+      "series:FEDFUNDS"
+    ],
+    "regime_hint": "high inflation tightening",
+    "failure_condition": "60-day returns are positive in > 50% of periods when CPIAUCSL > 3% and FEDFUNDS rises, or the regime-specific return differential is insignificant (p > 0.05)."
+  }
+]

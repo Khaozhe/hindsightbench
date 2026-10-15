@@ -1,0 +1,445 @@
+We are given a decision time point of 2005-08-15, and we can only use data available on or before that date.
+ The observable catalog has the following series (with their IDs):
+   GDPC1, CPIAUCSL, PAYEMS, INDPRO, RSAFS, UNRATE, HOUST, FEDFUNDS
+
+ We are to generate 8 hypotheses (H_001 to H_008) as a JSON array.
+
+ Requirements:
+   - Cover at least 3 different dominant_domains (from: demand, supply, monetary, labor).
+   - Include at least 1 sketch per mechanism type:
+        * Always-on trend signal (candidate_trigger = "none", candidate_interactions = false)
+        * Threshold-triggered signal (candidate_trigger describes a crossing condition)
+        * Interaction-driven signal (candidate_interactions = true, >= 2 proxies)
+        * Regime-conditional signal (regime_hint is specific, not "any regime")
+
+   - Vary candidate_horizon_hint across 5, 20, 60 (so we should have some with 5, some with 20, some with 60).
+
+   - Each hypothesis must be a concrete, falsifiable causal claim.
+
+   - We have the latest macro snapshot (as of t-1mo, t-2mo, t-4mo) for the target panel.
+
+ Let's plan the 8 hypotheses:
+
+ We need to cover at least 3 domains. Let's aim for:
+   - monetary (for 2-3 hypotheses)
+   - labor (for 2-3 hypotheses)
+   - demand (for 2-3 hypotheses)
+   - supply (for 1-2 hypotheses)
+
+ But note: we have to have at least 3 different domains.
+
+ We also need to cover the mechanism types:
+
+   Type 1: Always-on trend signal (candidate_trigger = "none", candidate_interactions = false) -> 1 example
+   Type 2: Threshold-triggered signal (candidate_trigger describes a condition) -> 1 example
+   Type 3: Interaction-driven signal (candidate_interactions = true) -> 1 example
+   Type 4: Regime-conditional signal (regime_hint specific) -> 1 example
+
+ But we have 8 hypotheses, so we can have multiple of each type.
+
+ Let's assign:
+
+   H_001: Always-on trend signal (monetary domain) -> candidate_trigger = "none", candidate_interactions = false
+   H_002: Threshold-triggered signal (labor domain) -> candidate_trigger = "condition", candidate_interactions = false
+   H_003: Interaction-driven signal (demand domain) -> candidate_interactions = true (with 2 proxies)
+   H_004: Regime-conditional signal (supply domain) -> regime_hint specific
+
+ Then we have 4 more to cover the other domains and types.
+
+ We'll spread the horizon hints (5, 20, 60) across the 8.
+
+ Let's create the 8 hypotheses:
+
+ H_001: Always-on trend (monetary, FEDFUNDS as proxy, horizon 20)
+   - Mechanism: Lower FEDFUNDS rate leads to lower discount rates, hence positive equity returns.
+   - direction: "+"
+   - candidate_proxies: ["FEDFUNDS"]
+   - candidate_horizon_hint: 20
+   - candidate_trigger: "none"
+   - candidate_interactions: false
+   - evidence_refs: ["series:FEDFUNDS"] (we have the value 1.55 as of t-1mo, which is low)
+   - regime_hint: "monetary easing cycle" (but note: we are using always-on, so we don't require a specific trigger, but the regime hint can be the context where it's active)
+   - failure_condition: "SPX 20d returns are negative in more than 50% of instances when FEDFUNDS is below 1.5% (current value) over the next 20 days."
+
+ H_002: Threshold-triggered (labor domain, UNRATE as proxy)
+   - Mechanism: When unemployment rate rises above a threshold (e.g., 4.0%), it signals economic weakness and may lead to policy response, but also might indicate a slowdown in labor demand. However, note: in 2005, the unemployment rate was 3.6% (as of t-1mo). We can set a threshold for a rise.
+   - But note: we want a causal mechanism. A rising unemployment rate might be a sign of economic trouble, which could lead to negative returns? Or a falling unemployment rate might be positive? Let's think: in the context of 2005, the economy was in a recovery phase. A rising unemployment rate (from a low) might be a negative signal.
+   - We'll set: if UNRATE rises above 4.0% (from current 3.6%), then it's a negative signal for the next 20 days.
+   - direction: "-"
+   - candidate_proxies: ["UNRATE"]
+   - candidate_horizon_hint: 20
+   - candidate_trigger: "UNRATE rises > 4.0% (current value 3.6%)"
+   - candidate_interactions: false
+   - evidence_refs: ["series:UNRATE", "fact:current UNRATE=3.6%"]
+   - regime_hint: "labor market deterioration"
+   - failure_condition: "SPX 20d returns are positive in more than 60% of instances when UNRATE rises above 4.0%."
+
+ H_003: Interaction-driven (demand domain, using two proxies: HOUST and RSAFS)
+   - Mechanism: A simultaneous decline in housing starts (HOUST) and residential sales (RSAFS) indicates a weakening in the housing market, which is a key component of consumer demand. This leads to negative equity returns as it signals a potential economic slowdown.
+   - direction: "-"
+   - candidate_proxies: ["HOUST", "RSAFS"]
+   - candidate_interactions: true (because we require both to be declining)
+   - candidate_horizon_hint: 20
+   - candidate_trigger: "HOUST falls > 5% and RSAFS falls > 5% in 1 month" (we can set a threshold for the decline)
+   - evidence_refs: ["series:HOUST", "series:RSAFS", "fact:HOUST=1608.0 (t-2mo), RSAFS=529766.0 (t-1mo)"]
+   - regime_hint: "housing market contraction"
+   - failure_condition: "SPX 20d returns are positive in more than 50% of instances when both HOUST and RSAFS decline by more than 5%."
+
+ H_004: Regime-conditional (supply domain, INDPRO as proxy)
+   - Mechanism: In a period of strong industrial production (INDPRO above 110), the economy is expanding and corporate profits are rising, leading to positive equity returns. But note: we are in 2005, and INDPRO was 109.2026 (t-1mo). So we set a threshold for high INDPRO.
+   - However, we want a regime-conditional signal: we are only active in a specific regime (like expansionary phase). So we set the regime to "expansionary cycle" and the signal is that INDPRO above 110 is a positive signal.
+   - But note: the mechanism is always active? We want to make it regime-conditional: the signal is only active when the economy is in an expansionary cycle (which we can define by having INDPRO above 110 and also other conditions? But we are using INDPRO as the proxy for the regime). Alternatively, we can set the regime_hint to "expansionary cycle" and the trigger is that INDPRO is above 110 (so it's a threshold-triggered within the regime). However, the requirement for regime-conditional is that the regime_hint is specific (not "any regime"). So we can set regime_hint to "expansionary cycle" and candidate_trigger to "INDPRO > 110" (which is the condition for the regime). But note: the candidate_trigger is for the signal to be active, and the regime_hint is the context.
+
+   Let's structure:
+     - candidate_trigger: "INDPRO > 110" (so the signal is active only when INDPRO is above 110)
+     - regime_hint: "expansionary cycle" (so the mechanism is expected to be active in expansionary cycles, and we are using INDPRO as the indicator of that cycle)
+
+   However, note: the candidate_trigger is the condition for the signal to be active. So we are setting the trigger as INDPRO>110, and the regime_hint is the context (expansionary cycle) which is the same as the trigger condition? But the requirement for regime-conditional is that the regime_hint is specific. We can have:
+
+        candidate_trigger: "INDPRO > 110"
+        regime_hint: "expansionary cycle"
+
+   But note: the mechanism is that in an expansionary cycle (which we define by INDPRO>110), INDPRO being above 110 is a positive signal? Actually, we are using INDPRO as the proxy for the regime and the signal. This might be circular.
+
+   Alternative: We can have a different proxy for the regime. But we are limited to the available series.
+
+   Let's change: We'll use INDPRO as the proxy for the signal, and the regime_hint is "expansionary cycle", meaning the mechanism is only expected to work in expansionary cycles (which we define by INDPRO>110). But the candidate_trigger is the condition for the signal to be active (so we require INDPRO>110 to activate the signal). So the candidate_trigger is the same as the regime condition.
+
+   We'll set:
+        direction: "+"
+        candidate_proxies: ["INDPRO"]
+        candidate_horizon_hint: 20
+        candidate_trigger: "INDPRO > 110"   (current value is 109.2, so if it rises above 110, then we get a positive signal)
+        candidate_interactions: false
+        regime_hint: "expansionary cycle"
+
+   But note: the requirement for regime-conditional is that the regime_hint is specific. We have "expansionary cycle", which is specific.
+
+   Failure condition: "SPX 20d returns are negative in more than 50% of instances when INDPRO > 110."
+
+ H_005: Always-on trend (labor domain, PAYEMS as proxy)
+   - Mechanism: A rising number of payroll employment (PAYEMS) indicates a strengthening labor market, which supports consumer spending and corporate earnings, leading to positive equity returns.
+   - direction: "+"
+   - candidate_proxies: ["PAYEMS"]
+   - candidate_horizon_hint: 5 (short horizon)
+   - candidate_trigger: "none"
+   - candidate_interactions: false
+   - evidence_refs: ["series:PAYEMS", "fact:PAYEMS=152186.0 (t-1mo)"]
+   - regime_hint: "labor market expansion"
+   - failure_condition: "SPX 5d returns are negative in more than 55% of instances when PAYEMS is rising (month-over-month)."
+
+ H_006: Threshold-triggered (monetary domain, CPIAUCSL as proxy)
+   - Mechanism: A sustained increase in the CPI (inflation) above a threshold (e.g., 3.0% annual rate) may lead to expectations of monetary tightening, which would cause negative equity returns.
+   - Note: The current CPIAUCSL is 258.82 (as of t-1mo, which is an index, but we need to convert to annual rate? However, the series is given as index. We can use the index value to compute the change. But the threshold is usually in annual percentage change. However, the problem says we have the value as 258.82. We can assume that the index is for the month, so we can look at the change from previous month. But the problem doesn't give the change, so we have to set a threshold on the index? Actually, the index value is not directly the inflation rate. We need to compute the inflation rate from the index.
+
+   However, note: the series CPIAUCSL is an index (1982-1984=100). The inflation rate is the percentage change from the same month last year. But we don't have the value for the same month last year in the snapshot. So we have to use the index value as a proxy for the level, and set a threshold on the index level? But the index level is not the inflation rate.
+
+   Alternatively, we can set a threshold on the monthly change (e.g., CPIAUCSL increases by more than 0.5% in a month). But the problem says we have the value as 258.82 (for the month). We don't have the previous month. So we cannot compute the monthly change from the given snapshot.
+
+   Therefore, we must avoid using a threshold that requires the change (which we don't have). Instead, we can set a threshold on the index level? But the index level is not directly comparable to inflation. The inflation rate is computed as (current index / index 12 months ago - 1) * 100.
+
+   Given the constraints, we'll set a threshold on the index level for the purpose of the hypothesis, but note: the index level is not the inflation rate. However, for the sake of the exercise, we'll assume that a high index level (e.g., above 260) might correspond to high inflation. But 258.82 is the current index, so we can set:
+
+        candidate_trigger: "CPIAUCSL > 260"
+
+   But note: the index is 258.82, so if it rises above 260, that would be a 0.4% increase from the current index? Actually, the index is cumulative. The inflation rate is the change from the same month last year. However, we don't have the same month last year. So we have to be cautious.
+
+   Alternatively, we can use the fact that the index is 258.82 and set a threshold on the index level as a proxy for high inflation (since the index has been rising). But note: the index level is not the inflation rate. The inflation rate is the percentage change.
+
+   Given the constraints of the problem, we'll use the index level as a proxy for the inflation level, and set a threshold of 260 (which is above the current 258.82). We'll assume that the index level above 260 corresponds to a high inflation environment.
+
+   So:
+        direction: "-"
+        candidate_proxies: ["CPIAUCSL"]
+        candidate_horizon_hint: 20
+        candidate_trigger: "CPIAUCSL > 260"
+        candidate_interactions: false
+        evidence_refs: ["series:CPIAUCSL", "fact:CPIAUCSL=258.82"]
+        regime_hint: "inflationary pressure"
+        failure_condition: "SPX 20d returns are positive in more than 55% of instances when CPIAUCSL > 260."
+
+ H_007: Interaction-driven (demand domain, using GDPC1 and HOUST)
+   - Mechanism: A simultaneous decline in GDP growth (GDPC1) and housing starts (HOUST) indicates a weakening in the overall economy and the housing sector, which is a key driver of consumer spending. This leads to negative equity returns.
+   - direction: "-"
+   - candidate_proxies: ["GDPC1", "HOUST"]
+   - candidate_interactions: true
+   - candidate_horizon_hint: 60 (longer horizon)
+   - candidate_trigger: "GDPC1 falls > 0.5% and HOUST falls > 5% in 3 months" (we are using 3 months as the window for the decline, but note: GDPC1 is quarterly, so we have to be careful. However, the hypothesis is about the trend over the past 3 months. We can use the quarterly GDP value as a proxy for the trend, but the snapshot for GDPC1 is as of t-4mo (so it's the last quarter). We can set a threshold on the change from the previous quarter? But we don't have the previous quarter in the snapshot. So we'll assume that the value 19219.767 (for GDPC1) is the current quarter, and we can compare to the previous quarter (which we don't have). Therefore, we have to set the trigger as a condition on the current value relative to a threshold? But the hypothesis is about a decline, so we need the change.
+
+   However, the problem states: "only information available on or before this date is admissible". We don't have the previous quarter in the snapshot, so we cannot compute the change. Therefore, we must avoid using a change in the trigger.
+
+   Alternative: We can set the trigger as a condition on the absolute level? But that doesn't make sense for a decline. We need a relative change.
+
+   Given the constraints, we'll have to use the current value and assume that we have the previous value (even though it's not in the snapshot). But the problem says we can only use the snapshot. So we cannot compute the change. Therefore, we must not use a trigger that requires a change without having the previous value.
+
+   How about: We set the trigger as "GDPC1 < 19000" (as a proxy for a decline from the previous quarter, which was 19219.767? But we don't know the previous quarter). This is messy.
+
+   Let's change the trigger to be based on the current value relative to a known historical level? But that's not a trigger for the current state.
+
+   We'll adjust: We'll use the current value of GDPC1 (19219.767) and set a threshold for a decline from the previous quarter. But we don't have the previous quarter. So we cannot. Therefore, we must avoid using GDPC1 for a trigger that requires a change.
+
+   Instead, we can use the change in the series as known from the data (even though we don't have it in the snapshot, the hypothesis is about the mechanism that would be used in the future, so we assume that the change can be computed from the data). The problem says: "only information available on or before this date" - meaning we have the data to compute the change (because the data is available on or before, so we have the previous quarter's value). But the snapshot provided in the prompt does not include the previous quarter. However, the hypothesis is for the mechanism that would be used at the time, so we assume that the previous quarter's value is available (as it is on or before the decision time).
+
+   Therefore, we can set:
+
+        candidate_trigger: "GDPC1 (Q3 2005) < 19000 and HOUST < 1500"
+
+   But note: the current HOUST is 1608.0 (t-2mo). We don't have a previous HOUST value in the snapshot, but we assume it's available.
+
+   We'll set:
+
+        candidate_trigger: "GDPC1 falls > 1.0% from prior quarter and HOUST falls > 5% from prior month"
+
+   However, the problem says: the snapshot has HOUST as of t-2mo (so we have the value for the month, but we don't have the prior month). But again, we assume that the prior month value is available (on or before the decision time).
+
+   So we'll write the trigger as:
+
+        "GDPC1 (Q3) < 19000 and HOUST < 1500"   [using absolute thresholds for simplicity, but note: the current HOUST is 1608, so 1500 is a 6.7% decline]
+
+   But to be consistent with the format, we'll use:
+
+        candidate_trigger: "GDPC1 < 19000 and HOUST < 1500"
+
+   However, the problem says: "candidate_trigger describes the threshold or regime condition". We can use absolute thresholds.
+
+   Let's set:
+
+        candidate_trigger: "GDPC1 < 19000 and HOUST < 1500"
+
+   But note: the current GDPC1 is 19219.767 (which is for the quarter ending 2005-06-30, I assume). So 19000 is a decline from 19219.767 (about 1.1% decline). And HOUST current is 1608, so 1500 is a 6.7% decline.
+
+   We'll use:
+
+        candidate_trigger: "GDPC1 < 19000 and HOUST < 1500"
+
+   Now, the mechanism: if both are below these thresholds, then negative returns.
+
+   direction: "-"
+   candidate_interactions: true
+
+   We'll set candidate_horizon_hint: 60.
+
+   evidence_refs: ["series:GDPC1", "series:HOUST", "fact:GDPC1=19219.767, HOUST=1608.0"]
+   regime_hint: "economic contraction"
+   failure_condition: "SPX 60d returns are positive in more than 50% of instances when GDPC1 < 19000 and HOUST < 1500."
+
+ H_008: Regime-conditional (monetary domain, FEDFUNDS as proxy, but with a specific regime)
+   - Mechanism: In a period of low interest rates (FEDFUNDS below 2.0%), the central bank is likely to keep rates low to support the economy, which is positive for equities. But note: the current FEDFUNDS is 1.55, which is below 2.0. So we set the regime as "low interest rate environment", and the signal is active when FEDFUNDS is below 2.0.
+   - However, we want a regime-conditional signal: the mechanism is only active in the low interest rate regime. So we set:
+        candidate_trigger: "FEDFUNDS < 2.0"   (which is the condition for the regime)
+        regime_hint: "low interest rate environment"
+
+   But note: the mechanism is that in this regime, the signal (FEDFUNDS < 2.0) is positive? Actually, the signal is the condition (FEDFUNDS < 2.0) and we are saying that in the low interest rate environment (which is defined by FEDFUNDS < 2.0), the signal is positive. So the candidate_trigger is the condition that activates the signal, and the regime_hint is the context.
+
+   We'll set:
+        direction: "+"
+        candidate_proxies: ["FEDFUNDS"]
+        candidate_horizon_hint: 60
+        candidate_trigger: "FEDFUNDS < 2.0"
+        candidate_interactions: false
+        evidence_refs: ["series:FEDFUNDS", "fact:FEDFUNDS=1.55"]
+        regime_hint: "low interest rate environment"
+        failure_condition: "SPX 60d returns are negative in more than 55% of instances when FEDFUNDS < 2.0."
+
+ Now, let's check the domains:
+
+   H_001: monetary
+   H_002: labor
+   H_003: demand
+   H_004: supply
+   H_005: labor
+   H_006: monetary
+   H_007: demand
+   H_008: monetary
+
+ We have covered:
+   monetary: H_001, H_006, H_008 -> 3
+   labor: H_002, H_005 -> 2
+   demand: H_003, H_007 -> 2
+   supply: H_004 -> 1
+
+ So we have 4 domains, which is more than 3.
+
+ Mechanism types:
+   Always-on: H_001, H_005 -> 2
+   Threshold-triggered: H_002, H_006 -> 2
+   Interaction-driven: H_003, H_007 -> 2
+   Regime-conditional: H_004, H_008 -> 2
+
+ Horizon hints:
+   H_001: 20
+   H_002: 20
+   H_003: 20
+   H_004: 20
+   H_005: 5
+   H_006: 20
+   H_007: 60
+   H_008: 60
+
+ We have 5, 20, 60.
+
+ Now, let's write the JSON array.
+
+ Note: We must use exact series IDs from the catalog.
+
+ Let's write each hypothesis in the required format.
+
+ Important: The failure_condition must be specific and falsifiable.
+
+ We'll write the 8 hypotheses.
+
+ Note: The example H_000 is a format reference, so we start at H_001.
+
+ Let's create the JSON array.
+</think>
+
+[
+  {
+    "hypothesis_id": "H_001",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "A sustained decline in the federal funds rate below 1.5% compresses discount rates for equity valuation, generating positive S&P 500 returns over the next 20 trading days as investors shift toward risk assets during monetary easing cycles.",
+    "direction": "+",
+    "candidate_proxies": [
+      "FEDFUNDS"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:FEDFUNDS",
+      "fact:FEDFUNDS=1.55"
+    ],
+    "regime_hint": "monetary easing cycle",
+    "failure_condition": "SPX 20d returns are negative in more than 55% of instances when FEDFUNDS remains below 1.5% over the next 20 days."
+  },
+  {
+    "hypothesis_id": "H_002",
+    "dominant_domain": "labor",
+    "mechanism_narrative": "A monthly unemployment rate increase exceeding 0.3 percentage points from the prior month signals deteriorating labor market conditions, triggering negative equity returns as corporate profit expectations decline due to reduced consumer spending capacity.",
+    "direction": "-",
+    "candidate_proxies": [
+      "UNRATE"
+    ],
+    "candidate_horizon_hint": 5,
+    "candidate_trigger": "UNRATE rises > 0.3pp from prior month",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:UNRATE",
+      "fact:UNRATE=3.6"
+    ],
+    "regime_hint": "labor market deterioration",
+    "failure_condition": "SPX 5d returns are positive in more than 60% of instances when UNRATE increases by >0.3pp."
+  },
+  {
+    "hypothesis_id": "H_003",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "Simultaneous declines in housing starts (HOUST) and residential sales (RSAFS) exceeding 5% from prior month indicate weakening consumer demand, causing negative equity returns as housing sector contraction reduces aggregate consumption and corporate revenue growth.",
+    "direction": "-",
+    "candidate_proxies": [
+      "HOUST",
+      "RSAFS"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "HOUST falls > 5% and RSAFS falls > 5% from prior month",
+    "candidate_interactions": true,
+    "evidence_refs": [
+      "series:HOUST",
+      "series:RSAFS",
+      "fact:HOUST=1608.0, RSAFS=529766.0"
+    ],
+    "regime_hint": "housing market contraction",
+    "failure_condition": "SPX 20d returns are positive in more than 50% of instances when both HOUST and RSAFS decline by >5%."
+  },
+  {
+    "hypothesis_id": "H_004",
+    "dominant_domain": "supply",
+    "mechanism_narrative": "Industrial production (INDPRO) exceeding 110 indicates robust manufacturing output, driving positive equity returns through sustained corporate profit growth and reduced recession risk during expansionary economic cycles.",
+    "direction": "+",
+    "candidate_proxies": [
+      "INDPRO"
+    ],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "INDPRO > 110",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:INDPRO",
+      "fact:INDPRO=109.2026"
+    ],
+    "regime_hint": "industrial expansion phase",
+    "failure_condition": "SPX 60d returns are negative in more than 55% of instances when INDPRO > 110."
+  },
+  {
+    "hypothesis_id": "H_005",
+    "dominant_domain": "labor",
+    "mechanism_narrative": "A rising payroll employment trend (PAYEMS) above 152,000 thousand persons signals strengthening labor market conditions, generating positive equity returns through increased consumer spending and corporate earnings growth over the next 5 trading days.",
+    "direction": "+",
+    "candidate_proxies": [
+      "PAYEMS"
+    ],
+    "candidate_horizon_hint": 5,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:PAYEMS",
+      "fact:PAYEMS=152186.0"
+    ],
+    "regime_hint": "labor market expansion",
+    "failure_condition": "SPX 5d returns are negative in more than 55% of instances when PAYEMS exceeds 152,000 thousand."
+  },
+  {
+    "hypothesis_id": "H_006",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "CPIAUCSL exceeding 260 indicates accelerating inflation, prompting expectations of monetary tightening that depresses equity valuations through higher discount rates and reduced risk appetite over the next 20 trading days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "CPIAUCSL"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "CPIAUCSL > 260",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:CPIAUCSL",
+      "fact:CPIAUCSL=258.82"
+    ],
+    "regime_hint": "inflationary pressure",
+    "failure_condition": "SPX 20d returns are positive in more than 55% of instances when CPIAUCSL > 260."
+  },
+  {
+    "hypothesis_id": "H_007",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "Simultaneous declines in GDP (GDPC1) below 19,000 billion and housing starts (HOUST) below 1,500 thousand units signal broad-based economic weakness, causing negative equity returns through reduced consumer spending and corporate revenue forecasts.",
+    "direction": "-",
+    "candidate_proxies": [
+      "GDPC1",
+      "HOUST"
+    ],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "GDPC1 < 19000 and HOUST < 1500",
+    "candidate_interactions": true,
+    "evidence_refs": [
+      "series:GDPC1",
+      "series:HOUST",
+      "fact:GDPC1=19219.767, HOUST=1608.0"
+    ],
+    "regime_hint": "economic contraction",
+    "failure_condition": "SPX 60d returns are positive in more than 50% of instances when GDPC1 < 19000 and HOUST < 1500."
+  },
+  {
+    "hypothesis_id": "H_008",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "FEDFUNDS below 2.0% during low interest rate regimes sustains accommodative monetary policy, generating positive equity returns through prolonged low discount rates and enhanced risk asset attractiveness over the next 60 trading days.",
+    "direction": "+",
+    "candidate_proxies": [
+      "FEDFUNDS"
+    ],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "FEDFUNDS < 2.0",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:FEDFUNDS",
+      "fact:FEDFUNDS=1.55"
+    ],
+    "regime_hint": "low interest rate environment",
+    "failure_condition": "SPX 60d returns are negative in more than 55% of instances when FEDFUNDS < 2.0."
+  }
+]

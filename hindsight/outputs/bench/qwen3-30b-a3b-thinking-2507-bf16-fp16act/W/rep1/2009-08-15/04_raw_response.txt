@@ -1,0 +1,512 @@
+We are generating 8 hypotheses for the S&P 500 forward 20-day returns as of 2015-02-15.
+ The decision time point is 2015-02-15, so we can only use data available on or before that date.
+
+ Observable Catalog (from the provided list):
+   GDPC1, CPIAUCSL, PAYEMS, INDPRO, RSAFS, UNRATE, HOUST, FEDFUNDS
+
+ We must assign 8 hypotheses (H_001 to H_008) with the following requirements:
+   - Cover at least 3 different dominant_domains (demand, supply, monetary, labor).
+   - Include at least one of each mechanism type:
+        * Always-on trend signal (candidate_trigger = "none", candidate_interactions = false)
+        * Threshold-triggered signal (candidate_trigger describes a crossing condition)
+        * Interaction-driven signal (candidate_interactions = true, >= 2 proxies)
+        * Regime-conditional signal (regime_hint is specific, not "any regime")
+   - Vary candidate_horizon_hint across 5, 20, 60.
+
+ We have the latest macro snapshot (as of 2015-02-15, with the given values) to inform our hypotheses.
+
+ Let's plan:
+
+ 1. We need to cover at least 3 domains. We'll aim for 2-3 in each to be safe.
+
+ 2. We'll assign the 8 hypotheses to cover the required mechanism types.
+
+ 3. We must use the exact series IDs from the catalog.
+
+ 4. We must have a falsifiable condition.
+
+ Let's list the domains and the series:
+
+   demand: GDPC1, RSAFS, HOUST
+   supply: INDPRO
+   monetary: CPIAUCSL, FEDFUNDS
+   labor: PAYEMS, UNRATE
+
+ We'll try to spread the domains.
+
+ Proposed breakdown:
+
+   H_001: Always-on trend signal (monetary domain) -> candidate_trigger="none", candidate_interactions=false
+   H_002: Threshold-triggered signal (labor domain) -> candidate_trigger with a threshold
+   H_003: Interaction-driven signal (demand domain) -> candidate_interactions=true (with 2 proxies)
+   H_004: Regime-conditional signal (supply domain) -> regime_hint specific
+   H_005: Always-on trend signal (labor domain) -> but we already have one always-on, so we can have two? 
+        However, we must have at least one of each type. We'll have two always-on to cover the requirement.
+
+   But note: we need at least one of each type. So we'll have:
+        Always-on: 2 (to be safe, but we only need one)
+        Threshold-triggered: 1
+        Interaction-driven: 1
+        Regime-conditional: 1
+
+   Then the remaining 4 can be distributed to cover domains and horizons.
+
+   However, the requirement says "at least 1 sketch per mechanism type", so we can have more than one of a type.
+
+   Let's plan for:
+
+        Always-on: H_001, H_005
+        Threshold-triggered: H_002
+        Interaction-driven: H_003
+        Regime-conditional: H_004
+
+   Then H_006, H_007, H_008 can be additional ones (with any type, but we'll try to cover domains and horizons).
+
+   We also need to vary the horizon: 5, 20, 60.
+
+   We'll assign horizons to spread out.
+
+   Now, let's create each hypothesis with the required fields.
+
+   Important: 
+        - direction: only "+" or "-"
+        - candidate_proxies: must be from the catalog, max 4, min 1.
+        - candidate_interactions: boolean (true/false)
+        - candidate_trigger: if not always-on, must be a string describing a threshold (e.g., "FEDFUNDS > 2.0%")
+        - failure_condition: must be specific and falsifiable.
+
+   We are at 2015-02-15. The market context: 
+        - FEDFUNDS is 0.16% (very low, near zero)
+        - UNRATE is 9.4% (high, from the Great Recession)
+        - CPIAUCSL is 214.469 (inflation index, but we don't have the trend, so we have to base on the value)
+
+   We'll base our hypotheses on typical economic relationships.
+
+   Let's create:
+
+   H_001 (Always-on, monetary, horizon=20):
+        dominant_domain: monetary
+        mechanism_narrative: "A low federal funds rate (below 0.5%) indicates accommodative monetary policy that reduces the cost of capital for corporations, leading to higher equity valuations and positive S&P 500 returns over the next 20 trading days."
+        direction: "+"
+        candidate_proxies: ["FEDFUNDS"]
+        candidate_horizon_hint: 20
+        candidate_trigger: "none"
+        candidate_interactions: false
+        evidence_refs: ["series:FEDFUNDS"]   (since FEDFUNDS=0.16 < 0.5)
+        regime_hint: "monetary easing cycle"
+        failure_condition: "SPX 20-day returns are negative in more than 60% of periods when FEDFUNDS is below 0.5% (p-value > 0.05 in t-test against zero)."
+
+   H_002 (Threshold-triggered, labor, horizon=5):
+        dominant_domain: labor
+        mechanism_narrative: "A sustained increase in the unemployment rate above 9.0% for two consecutive months signals weak labor market conditions that reduce consumer spending and corporate earnings growth, causing negative S&P 500 returns over the next 5 trading days."
+        direction: "-"
+        candidate_proxies: ["UNRATE"]
+        candidate_horizon_hint: 5
+        candidate_trigger: "UNRATE > 9.0%"
+        candidate_interactions: false
+        evidence_refs: ["series:UNRATE"]   (UNRATE=9.4 > 9.0)
+        regime_hint: "high unemployment regime"
+        failure_condition: "SPX 5-day returns are positive in more than 60% of periods when UNRATE exceeds 9.0% (p-value > 0.05 in t-test against zero)."
+
+   H_003 (Interaction-driven, demand, horizon=20):
+        dominant_domain: demand
+        mechanism_narrative: "Simultaneous declines in both residential investment (HOUST) and consumer spending (RSAFS) indicate a broad-based weakening in demand, which triggers a sell-off in equities as corporate revenue growth expectations fall, leading to negative S&P 500 returns over the next 20 trading days."
+        direction: "-"
+        candidate_proxies: ["HOUST", "RSAFS"]
+        candidate_horizon_hint: 20
+        candidate_trigger: "none"   (but note: we are using two series together, so it's always-on in the sense that we look for the joint decline, but the trigger is the joint condition. However, the requirement for interaction-driven is candidate_interactions=true. We don't need a separate trigger condition for the interaction, so we set candidate_trigger to "none" for the interaction mechanism? But note: the mechanism is active when both are declining. However, the candidate_trigger field is for a threshold condition on a single series or a condition that activates the signal. For interaction, we don't have a threshold trigger, so we set candidate_trigger to "none". But note: the interaction is the mechanism, so we don't need a threshold trigger. We'll set candidate_trigger to "none" and candidate_interactions=true.
+        candidate_interactions: true
+        evidence_refs: ["series:HOUST", "series:RSAFS"]   (HOUST=582.0, RSAFS=342309.0 - we don't have the trend, but we assume the hypothesis is based on the current values being below a previous level? But the evidence_refs just point to the series, not the trend. We'll state the evidence as the series being available and the current value, but the mechanism is about the trend. However, the evidence_refs are for the series, not the trend. So we list the series.)
+        regime_hint: "demand contraction"
+        failure_condition: "The joint decline in HOUST and RSAFS does not produce negative 20-day returns in at least 60% of cases (p-value > 0.05 in t-test against zero)."
+
+   H_004 (Regime-conditional, supply, horizon=60):
+        dominant_domain: supply
+        mechanism_narrative: "During periods of declining industrial production (INDPRO below 100), manufacturing sector weakness reduces corporate profit margins and investment, leading to negative S&P 500 returns over the next 60 trading days, but this effect is muted in high-growth regimes."
+        direction: "-"
+        candidate_proxies: ["INDPRO"]
+        candidate_horizon_hint: 60
+        candidate_trigger: "none"   (but note: the regime is conditional, so the candidate_trigger is not a threshold for activation, but the regime_hint is specific. The candidate_trigger for the signal itself is "none", but the regime_hint is "late-cycle expansion" or something? Actually, the regime_hint is for when the mechanism is active. We are saying it's active in a specific regime. However, the mechanism is conditional on the regime, so we set candidate_trigger to "none" and rely on regime_hint to specify the regime. But note: the candidate_trigger field is for the activation condition of the signal (i.e., when the signal is triggered). For a regime-conditional signal, the trigger might be the regime condition. However, the requirement says: "regime_hint is specific, not 'any regime'". So we set candidate_trigger to "none" and the regime_hint to the specific regime. But note: the mechanism is only active in that regime, so the signal is only considered in that regime. The candidate_trigger field is for the condition that must be met for the signal to be active (which in this case is the regime condition). However, the schema says: "candidate_trigger: Activation condition for the signal. Use the literal string 'none' if the mechanism is always-on." For regime-conditional, it's not always-on, so we should put the regime condition in candidate_trigger? But note: the regime_hint is a separate field. The candidate_trigger is for the condition on the proxies. The regime_hint is for the regime in which the mechanism is active.
+
+        Clarification from the schema: 
+          candidate_trigger: "Activation condition for the signal. ... Otherwise describe the threshold or regime condition that must be met before the signal is considered active"
+
+        So for a regime-conditional signal, the activation condition is the regime condition. Therefore, we should put the regime condition in candidate_trigger? But note: the regime_hint is a separate field that describes the regime. The candidate_trigger is the condition that must be met (which is the regime condition). However, the example in the schema for regime-conditional might be in the candidate_trigger.
+
+        Let me check the example: 
+          In the few-shot example, they have a regime_hint: "monetary easing cycle", and candidate_trigger="none". 
+
+        But note: the example is for an always-on signal in a specific regime. So the candidate_trigger is "none" because the signal is always-on within that regime? Actually, the signal is active whenever the regime is present, so the activation condition is the regime condition. However, the candidate_trigger field is meant for the condition on the proxy series. The regime condition might be defined by a proxy series (like FEDFUNDS being low) or by a combination. But in this case, we are using the regime_hint to say "monetary easing cycle", which is defined by the FEDFUNDS being low. So we don't need to put that in candidate_trigger because the candidate_trigger is for the proxy series condition. However, the mechanism is conditional on the regime, so the signal is only active when the regime is present. But the candidate_trigger field is for the condition that must be met (which is the regime condition). 
+
+        The problem: the candidate_trigger field is for the condition that must be met for the signal to be active. For a regime-conditional signal, the condition is the regime condition. So we should put the regime condition in candidate_trigger? But note: the regime condition might be defined by a proxy series. For example, "FEDFUNDS < 0.5%". However, we are using the regime_hint to describe the regime (like "monetary easing cycle") and the candidate_trigger would be the condition that defines that regime.
+
+        How about: 
+          candidate_trigger: "FEDFUNDS < 0.5%"   (if we are using FEDFUNDS to define the regime) but note we are not using FEDFUNDS in the candidate_proxies for this hypothesis.
+
+        Alternatively, we can have the candidate_trigger as the regime condition, even if it's not a proxy? But the candidate_trigger is supposed to be a condition on the proxies. The schema says: "candidate_trigger: Activation condition for the signal. ... Otherwise describe the threshold or regime condition that must be met before the signal is considered active (e.g., 'UNRATE rises > 0.3pp in 3 months', 'FEDFUNDS > 4.5%')."
+
+        So we can put a condition that uses a proxy series. But note: we are not using that series in the candidate_proxies for the mechanism? Actually, the mechanism is about INDPRO, but the regime condition might be defined by another series. However, the candidate_trigger condition must be based on the available series. We can use any series from the catalog.
+
+        But note: the candidate_trigger condition must be testable with the available series. We have FEDFUNDS, so we can use it.
+
+        However, for H_004, we are focusing on supply (INDPRO) and the regime is "late-cycle expansion" (which is a specific regime). But what defines "late-cycle expansion"? It's not directly a series. We might have to define it by a condition on a series. However, the requirement is to have a specific regime_hint. We'll set:
+
+          candidate_trigger: "none"   (because the signal is always active when the regime is present, but the regime is defined by the candidate_trigger condition? Actually, the candidate_trigger condition is the condition that must be met for the signal to be active. So if the regime is defined by a condition, we put that condition in candidate_trigger.)
+
+        Let's reframe: 
+          We want the mechanism to be active only in a specific regime (say, "late-cycle expansion"). How do we define "late-cycle expansion" in terms of the series? We might say: "when FEDFUNDS is above 2.0% and UNRATE is below 5.0%". But note: we don't have a direct series for "late-cycle expansion". So we have to define it by a condition on the proxies.
+
+        However, the problem: we are not using FEDFUNDS or UNRATE in the candidate_proxies for the mechanism (we are using INDPRO). But the candidate_trigger condition can be on any series. So we can set:
+
+          candidate_trigger: "FEDFUNDS > 2.0% AND UNRATE < 5.0%"
+
+        But note: the current values: FEDFUNDS=0.16 (which is not >2.0) and UNRATE=9.4 (not <5.0). So the condition is not met. But that's okay because the hypothesis is about when the condition is met.
+
+        However, the requirement for the hypothesis is to be a causal claim that can be falsified. We can define the regime condition in candidate_trigger.
+
+        But note: the schema example for the always-on signal had candidate_trigger="none", so for a regime-conditional signal, we should have a candidate_trigger that is the regime condition.
+
+        So for H_004:
+
+          candidate_trigger: "FEDFUNDS > 2.0% AND UNRATE < 5.0%"   (this defines the "late-cycle expansion" regime)
+
+        However, the regime_hint should be "late-cycle expansion" (as per the example).
+
+        But note: the regime_hint is a description of the regime, and the candidate_trigger is the condition that defines the regime.
+
+        Let's do:
+
+          candidate_trigger: "FEDFUNDS > 2.0% AND UNRATE < 5.0%"
+          regime_hint: "late-cycle expansion"
+
+        But note: the current values don't meet the condition, so the signal would not be active at the decision time. That's acceptable.
+
+        Now, the mechanism: 
+          "During periods of declining industrial production (INDPRO below 100), manufacturing sector weakness reduces corporate profit margins and investment, leading to negative S&P 500 returns over the next 60 trading days, but this effect is muted in high-growth regimes."
+
+        However, note: the mechanism says "during periods of declining industrial production", so we are using INDPRO as the proxy. But the condition for the signal to be active is the regime condition (FEDFUNDS>2.0% and UNRATE<5.0%). And within that regime, we look at INDPRO.
+
+        But note: the mechanism narrative says "during periods of declining industrial production", meaning we also require INDPRO to be declining? Actually, the candidate_proxies is only INDPRO, so we are using the level of INDPRO? The narrative says "declining", so we are implying a trend. However, the hypothesis must be based on the available data. We have the current value of INDPRO (95.9709) which is below 100 (the base year 2017=100). But we don't have the trend. So we have to assume that the hypothesis is about the level being below 100 (which is a decline from the base) or the trend? The series is an index, so a value below 100 means it's below the base. But the narrative says "declining", which might be a trend. However, we don't have the trend in the data. So we'll interpret the hypothesis as: when INDPRO is below 100 (which is a sign of weakness) and the regime condition holds.
+
+        But note: the candidate_proxies is just ["INDPRO"], so we are using the level. We'll adjust the narrative to say "when INDPRO is below 100" (which is a level condition, not a trend). However, the narrative says "declining", so we have to be careful. Alternatively, we can say "when INDPRO is below 100" and note that the base is 100, so below 100 indicates a decline from the base. But the base is 2017, so it's a long-term decline? Actually, the series is an index with base 2017=100, so a value below 100 means it's below the 2017 level. But we are in 2015, so it's a decline from 2017? Actually, 2015 is before 2017, so the index might be above 100? Wait, the base is 2017=100, so in 2015, the index might be below 100? Actually, the value given is 95.9709, which is below 100. So it's below the 2017 base. But that doesn't necessarily mean it's declining in the short term. However, for the purpose of the hypothesis, we'll assume that the level being below 100 is a proxy for weakness.
+
+        Alternatively, we can change the narrative to: "When industrial production (INDPRO) is below its 2017 base level (100), it signals manufacturing weakness that reduces corporate profits, leading to negative S&P 500 returns over the next 60 trading days, but this effect is muted in high-growth regimes."
+
+        But note: the base is 2017, so in 2015, it's below the base? Actually, the base is set to 2017, so the index is normalized to 100 in 2017. So in 2015, it's below 100 because the economy was weaker in 2015 than in 2017? That's possible. But the narrative should be about the current level.
+
+        Let's stick to the level condition.
+
+        So:
+
+          mechanism_narrative: "When industrial production (INDPRO) is below 100 (the 2017 base level), it signals manufacturing weakness that reduces corporate profits, leading to negative S&P 500 returns over the next 60 trading days, but this effect is muted in high-growth regimes."
+
+        However, note: the base is 2017, so the value 95.97 means it's 4.03% below the 2017 level. But we are in 2015, so it's a decline from the base? Actually, the base is set to 2017, so the index is constructed to be 100 in 2017. Therefore, a value below 100 in 2015 is not a decline from the current level but a decline from the 2017 level. But the narrative might be confusing.
+
+        Alternatively, we can avoid the base and just say "when INDPRO is below 100" (as a threshold) without explaining the base. The threshold is arbitrary but common in such indices.
+
+        We'll go with: "When industrial production (INDPRO) is below 100, it signals manufacturing weakness that reduces corporate profits, leading to negative S&P 500 returns over the next 60 trading days, but this effect is muted in high-growth regimes."
+
+        Now, the candidate_trigger: we are using the regime condition (FEDFUNDS>2.0% and UNRATE<5.0%) to activate the signal. So the signal is only considered when that regime condition holds.
+
+        candidate_trigger: "FEDFUNDS > 2.0% AND UNRATE < 5.0%"
+
+        But note: the current values don't meet this, so the signal is not active at the decision time.
+
+        Now, let's write the hypothesis:
+
+          dominant_domain: supply
+          mechanism_narrative: "When industrial production (INDPRO) is below 100, it signals manufacturing weakness that reduces corporate profits, leading to negative S&P 500 returns over the next 60 trading days, but this effect is muted in high-growth regimes."
+          direction: "-"
+          candidate_proxies: ["INDPRO"]
+          candidate_horizon_hint: 60
+          candidate_trigger: "FEDFUNDS > 2.0% AND UNRATE < 5.0%"
+          candidate_interactions: false
+          evidence_refs: ["series:INDPRO", "series:FEDFUNDS", "series:UNRATE"]   (we need to reference the series that define the trigger and the proxy)
+          regime_hint: "late-cycle expansion"
+          failure_condition: "SPX 60-day returns are positive in more than 60% of periods when INDPRO < 100 and the regime condition (FEDFUNDS>2.0% AND UNRATE<5.0%) holds (p-value > 0.05 in t-test against zero)."
+
+   H_005 (Always-on, labor, horizon=20):
+        dominant_domain: labor
+        mechanism_narrative: "A high unemployment rate (UNRATE above 8.0%) indicates persistent labor market slack that suppresses consumer spending and corporate revenue growth, leading to negative S&P 500 returns over the next 20 trading days."
+        direction: "-"
+        candidate_proxies: ["UNRATE"]
+        candidate_horizon_hint: 20
+        candidate_trigger: "none"
+        candidate_interactions: false
+        evidence_refs: ["series:UNRATE"]   (UNRATE=9.4 > 8.0)
+        regime_hint: "high unemployment regime"
+        failure_condition: "SPX 20-day returns are positive in more than 60% of periods when UNRATE exceeds 8.0% (p-value > 0.05 in t-test against zero)."
+
+   H_006 (Threshold-triggered, demand, horizon=5):
+        dominant_domain: demand
+        mechanism_narrative: "A sharp decline in residential construction (HOUST below 550.0 thousand units) signals a collapse in housing demand that reduces consumer wealth and spending, causing negative S&P 500 returns over the next 5 trading days."
+        direction: "-"
+        candidate_proxies: ["HOUST"]
+        candidate_horizon_hint: 5
+        candidate_trigger: "HOUST < 550.0"
+        candidate_interactions: false
+        evidence_refs: ["series:HOUST"]   (HOUST=582.0, which is above 550, so the condition is not met at the decision time)
+        regime_hint: "housing market contraction"
+        failure_condition: "SPX 5-day returns are positive in more than 60% of periods when HOUST falls below 550.0 (p-value > 0.05 in t-test against zero)."
+
+   H_007 (Interaction-driven, monetary, horizon=60):
+        dominant_domain: monetary
+        mechanism_narrative: "Simultaneous increases in inflation (CPIAUCSL above 2.0%) and the federal funds rate (FEDFUNDS above 0.5%) signal the onset of a monetary tightening cycle that raises discount rates and reduces equity valuations, leading to negative S&P 500 returns over the next 60 trading days."
+        direction: "-"
+        candidate_proxies: ["CPIAUCSL", "FEDFUNDS"]
+        candidate_horizon_hint: 60
+        candidate_trigger: "none"   (the interaction is the mechanism, so we don't have a separate trigger condition for the interaction; the condition is the joint increase, which is captured by the two series being above thresholds. But note: the candidate_trigger field is for the activation condition. We are using the two series to define the condition, so we don't need a separate trigger. We set candidate_trigger to "none" and candidate_interactions=true.)
+        candidate_interactions: true
+        evidence_refs: ["series:CPIAUCSL", "series:FEDFUNDS"]   (CPIAUCSL=214.469, FEDFUNDS=0.16; note: CPIAUCSL is an index, so we need to interpret the value. The index 214.469 means it's 114.469% above the base (1982-1984=100). But we are using it as a level? Actually, we want the inflation rate, but the series is the index. We cannot get the inflation rate from the index without the previous value. However, the hypothesis is about the level of the index? That doesn't make sense. We should use the change. But the series is the index, not the change. So we have to assume that the hypothesis is about the index level being above a certain value? But the index level is not directly the inflation rate. 
+
+        Correction: The series CPIAUCSL is the Consumer Price Index (CPI), which is an index. To get inflation, we need the change. But the hypothesis says "increases in inflation", meaning the rate of change. However, the candidate_proxies are the series IDs, and we are using the index. We cannot get the change from the index without the previous value. But the hypothesis must be based on the available data. We have the current index value, but not the change. So we cannot form a hypothesis about the change without the previous value. Therefore, we must avoid using the index level for inflation rate.
+
+        Alternative: We can use the series as is and define a threshold on the index? But that's not standard. The standard is to use the change. However, the problem states: "candidate_proxies must use exact series IDs from the observable catalog". We have to use the series as provided.
+
+        So we have to adjust the hypothesis to use the index level? But that doesn't make sense for inflation. 
+
+        Let's change the hypothesis to use the index level as a proxy for high inflation? But note: the index level is not the inflation rate. The inflation rate is the percentage change. However, if the index is very high, it might indicate high inflation. But we don't have a threshold for the index. The base is 1982-1984=100, so 214.469 means it's 114.469% above the base. But that doesn't tell us the current inflation rate.
+
+        Given the constraints, we'll have to use the index level as a proxy for the level of inflation (which is not standard, but we have to work with the data). We'll set a threshold: CPIAUCSL > 210 (which is above the current value of 214.469? Actually, 214.469 is above 210, so the condition would be met). But note: the current value is 214.469, so if we set the threshold at 210, it's above. However, the hypothesis is about the signal being active when the index is above 210. But the index level doesn't directly indicate the inflation rate. 
+
+        Alternatively, we can use the series as the index and set a threshold that is arbitrary but common (like 210). We'll do that.
+
+        So:
+
+          candidate_trigger: "none"   (because the interaction is the mechanism, and we are using the two series to define the condition: CPIAUCSL > 210 and FEDFUNDS > 0.5%)
+          But note: the candidate_trigger field is for the activation condition. We are not using a separate trigger condition; the condition is the joint condition of the two series. So we set candidate_trigger to "none" and rely on the candidate_interactions=true to indicate that the signal is the joint condition.
+
+        However, the candidate_trigger field is meant for a condition that must be met (like a threshold on a single series). For an interaction, we don't have a single threshold. So we set candidate_trigger to "none".
+
+        Now, the mechanism_narrative: "Simultaneous increases in the CPI index (CPIAUCSL above 210) and the federal funds rate (FEDFUNDS above 0.5%) signal the onset of a monetary tightening cycle that raises discount rates and reduces equity valuations, leading to negative S&P 500 returns over the next 60 trading days."
+
+        But note: the current CPIAUCSL is 214.469 (above 210) and FEDFUNDS is 0.16 (below 0.5%), so the condition is not met.
+
+        Now, the failure_condition: "The joint condition (CPIAUCSL > 210 AND FEDFUNDS > 0.5%) does not produce negative 60-day returns in at least 60% of cases (p-value > 0.05 in t-test against zero)."
+
+        However, note: the hypothesis says "increases in inflation", but we are using the index level. We'll have to live with that.
+
+        Let's write:
+
+          dominant_domain: monetary
+          mechanism_narrative: "Simultaneous increases in the CPI index (CPIAUCSL above 210) and the federal funds rate (FEDFUNDS above 0.5%) signal the onset of a monetary tightening cycle that raises discount rates and reduces equity valuations, leading to negative S&P 500 returns over the next 60 trading days."
+          direction: "-"
+          candidate_proxies: ["CPIAUCSL", "FEDFUNDS"]
+          candidate_horizon_hint: 60
+          candidate_trigger: "none"
+          candidate_interactions: true
+          evidence_refs: ["series:CPIAUCSL", "series:FEDFUNDS"]
+          regime_hint: "monetary tightening cycle"
+          failure_condition: "SPX 60-day returns are positive in more than 60% of periods when CPIAUCSL > 210 and FEDFUNDS > 0.5% (p-value > 0.05 in t-test against zero)."
+
+   H_008 (Threshold-triggered, demand, horizon=20):
+        dominant_domain: demand
+        mechanism_narrative: "A strong increase in consumer spending (RSAFS above 350,000 million dollars) signals robust economic growth that boosts corporate earnings and drives positive S&P 500 returns over the next 20 trading days."
+        direction: "+"
+        candidate_proxies: ["RSAFS"]
+        candidate_horizon_hint: 20
+        candidate_trigger: "RSAFS > 350000"
+        candidate_interactions: false
+        evidence_refs: ["series:RSAFS"]   (RSAFS=342309.0, which is below 350000, so condition not met)
+        regime_hint: "strong consumer spending regime"
+        failure_condition: "SPX 20-day returns are negative in more than 60% of periods when RSAFS exceeds 350,000 (p-value > 0.05 in t-test against zero)."
+
+   Now, let's check the requirements:
+
+        Domains covered:
+          H_001: monetary
+          H_002: labor
+          H_003: demand
+          H_004: supply
+          H_005: labor
+          H_006: demand
+          H_007: monetary
+          H_008: demand
+
+        We have at least 3 domains: demand, supply, monetary, labor -> 4 domains.
+
+        Mechanism types:
+          Always-on: H_001, H_005 -> two (we have at least one)
+          Threshold-triggered: H_002, H_006, H_008 -> three
+          Interaction-driven: H_003, H_007 -> two
+          Regime-conditional: H_004 -> one (we have at least one)
+
+        Horizons:
+          H_001: 20
+          H_002: 5
+          H_003: 20
+          H_004: 60
+          H_005: 20
+          H_006: 5
+          H_007: 60
+          H_008: 20
+
+        We have 5, 20, 60 covered.
+
+   Now, we must ensure the failure_condition is specific and falsifiable.
+
+   Let's write the JSON.
+
+   Note: The evidence_refs must be an array of strings in the format: 'series:<ID>', etc.
+
+   We'll write the 8 hypotheses.
+
+   Important: The hypothesis_id must be H_001 to H_008.
+
+   Let's code the JSON.
+
+   Note: The candidate_interactions must be a boolean (true or false), not a string.
+
+   We'll write the JSON array.
+
+   One more note: For H_004, we set candidate_trigger to "FEDFUNDS > 2.0% AND UNRATE < 5.0%", which is a string.
+
+   For H_007, we set candidate_trigger to "none".
+
+   Now, the JSON array.
+</think>
+
+[
+  {
+    "hypothesis_id": "H_001",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "A federal funds rate below 0.5% indicates accommodative monetary policy that reduces discount rates for equity cash flows, producing positive S&P 500 returns over the next 20 trading days as long as the rate remains at or below this threshold.",
+    "direction": "+",
+    "candidate_proxies": [
+      "FEDFUNDS"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:FEDFUNDS"
+    ],
+    "regime_hint": "monetary easing cycle",
+    "failure_condition": "SPX 20-day returns are negative in more than 60% of periods when FEDFUNDS ≤ 0.5% (p-value > 0.05 in t-test against zero)."
+  },
+  {
+    "hypothesis_id": "H_002",
+    "dominant_domain": "labor",
+    "mechanism_narrative": "Unemployment rate exceeding 9.0% for two consecutive months signals persistent labor market weakness that reduces consumer spending and corporate earnings growth, causing negative S&P 500 returns over the next 5 trading days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "UNRATE"
+    ],
+    "candidate_horizon_hint": 5,
+    "candidate_trigger": "UNRATE > 9.0%",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:UNRATE"
+    ],
+    "regime_hint": "high unemployment regime",
+    "failure_condition": "SPX 5-day returns are positive in more than 60% of periods when UNRATE > 9.0% (p-value > 0.05 in t-test against zero)."
+  },
+  {
+    "hypothesis_id": "H_003",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "Simultaneous declines in residential construction (HOUST below 580.0) and consumer spending (RSAFS below 340,000) indicate broad demand contraction that triggers equity sell-offs, producing negative S&P 500 returns over the next 20 trading days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "HOUST",
+      "RSAFS"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": true,
+    "evidence_refs": [
+      "series:HOUST",
+      "series:RSAFS"
+    ],
+    "regime_hint": "demand contraction",
+    "failure_condition": "The joint decline in HOUST < 580.0 and RSAFS < 340000 does not produce negative 20-day returns in at least 60% of cases (p-value > 0.05 in t-test against zero)."
+  },
+  {
+    "hypothesis_id": "H_004",
+    "dominant_domain": "supply",
+    "mechanism_narrative": "Industrial production below 100 (2017 base) signals manufacturing weakness that reduces corporate profits, leading to negative S&P 500 returns over the next 60 trading days, but only during late-cycle expansion regimes defined by high interest rates and low unemployment.",
+    "direction": "-",
+    "candidate_proxies": [
+      "INDPRO"
+    ],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "FEDFUNDS > 2.0% AND UNRATE < 5.0%",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:INDPRO",
+      "series:FEDFUNDS",
+      "series:UNRATE"
+    ],
+    "regime_hint": "late-cycle expansion",
+    "failure_condition": "SPX 60-day returns are positive in more than 60% of periods when INDPRO < 100 and (FEDFUNDS > 2.0% AND UNRATE < 5.0%) holds (p-value > 0.05 in t-test against zero)."
+  },
+  {
+    "hypothesis_id": "H_005",
+    "dominant_domain": "labor",
+    "mechanism_narrative": "Unemployment rate above 8.0% consistently indicates labor market slack that suppresses consumer spending and corporate revenue growth, producing negative S&P 500 returns over the next 20 trading days without regime conditions.",
+    "direction": "-",
+    "candidate_proxies": [
+      "UNRATE"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:UNRATE"
+    ],
+    "regime_hint": "high unemployment regime",
+    "failure_condition": "SPX 20-day returns are positive in more than 60% of periods when UNRATE > 8.0% (p-value > 0.05 in t-test against zero)."
+  },
+  {
+    "hypothesis_id": "H_006",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "Residential construction below 550.0 thousand units signals housing market collapse that reduces consumer wealth and spending, causing negative S&P 500 returns over the next 5 trading days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "HOUST"
+    ],
+    "candidate_horizon_hint": 5,
+    "candidate_trigger": "HOUST < 550.0",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:HOUST"
+    ],
+    "regime_hint": "housing market contraction",
+    "failure_condition": "SPX 5-day returns are positive in more than 60% of periods when HOUST < 550.0 (p-value > 0.05 in t-test against zero)."
+  },
+  {
+    "hypothesis_id": "H_007",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "Simultaneous CPI index above 210 and federal funds rate above 0.5% signal monetary tightening that raises equity discount rates, producing negative S&P 500 returns over the next 60 trading days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "CPIAUCSL",
+      "FEDFUNDS"
+    ],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "none",
+    "candidate_interactions": true,
+    "evidence_refs": [
+      "series:CPIAUCSL",
+      "series:FEDFUNDS"
+    ],
+    "regime_hint": "monetary tightening cycle",
+    "failure_condition": "The joint condition (CPIAUCSL > 210 AND FEDFUNDS > 0.5%) does not produce negative 60-day returns in at least 60% of cases (p-value > 0.05 in t-test against zero)."
+  },
+  {
+    "hypothesis_id": "H_008",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "Consumer spending above 350,000 million dollars signals robust economic growth that boosts corporate earnings, driving positive S&P 500 returns over the next 20 trading days.",
+    "direction": "+",
+    "candidate_proxies": [
+      "RSAFS"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "RSAFS > 350000",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:RSAFS"
+    ],
+    "regime_hint": "strong consumer spending regime",
+    "failure_condition": "SPX 20-day returns are negative in more than 60% of periods when RSAFS > 350000 (p-value > 0.05 in t-test against zero)."
+  }
+]

@@ -1,0 +1,485 @@
+We are generating 8 hypotheses for the S&P 500 forward 20-day returns as of 2022-11-15.
+ The decision time point is 2022-11-15, so we can only use data available on or before that date.
+
+ Observable Catalog (from the provided list):
+   GDPC1, CPIAUCSL, PAYEMS, INDPRO, RSAFS, UNRATE, HOUST, FEDFUNDS
+
+ We must cover at least 3 different dominant_domains (demand, supply, monetary, labor).
+
+ Requirements:
+   - 8 hypotheses, with IDs H_001 to H_008.
+   - At least 1 of each mechanism type: 
+        * Always-on trend signal (candidate_trigger = "none", candidate_interactions = false)
+        * Threshold-triggered signal (candidate_trigger describes a crossing condition)
+        * Interaction-driven signal (candidate_interactions = true, >= 2 proxies)
+        * Regime-conditional signal (regime_hint is specific, not "any regime")
+
+   - Vary candidate_horizon_hint: 5, 20, 60 (we have to use these numbers, but note: the target panel is 20-day, so 20 is the target, but we can have hints for 5, 20, 60 as per the enum)
+
+   - candidate_proxies must be from the catalog, max 4.
+
+   - candidate_interactions: boolean (true/false)
+
+   - direction: "+" or "-"
+
+   - failure_condition must be specific and falsifiable.
+
+   - evidence_refs: at least one, in the format 'series:<ID>', etc.
+
+   - regime_hint: must be specific for regime-conditional, otherwise "any regime" is acceptable but we need at least one with specific.
+
+ Let's plan:
+
+ We have 8 hypotheses to write. We'll assign:
+
+   H_001: Always-on trend signal (trigger: none, interactions: false)
+   H_002: Threshold-triggered signal
+   H_003: Interaction-driven signal (interactions: true, at least 2 proxies)
+   H_004: Regime-conditional signal (regime_hint specific)
+
+   Then we need 4 more to cover the domains and horizon variations.
+
+ We must cover at least 3 domains. We'll aim for 2 in monetary, 2 in labor, 2 in demand, 2 in supply? But note: we have to cover at least 3.
+
+ Let's assign domains:
+
+   We'll have:
+     H_001: monetary (always-on)
+     H_002: labor (threshold-triggered)
+     H_003: interaction (monetary and labor? or demand and supply) -> but note: we have to have at least 3 domains, so we'll spread.
+
+   We'll assign:
+
+     H_001: monetary (always-on)
+     H_002: labor (threshold-triggered)
+     H_003: demand (interaction-driven)
+     H_004: supply (regime-conditional)
+
+     Then the rest can be in any domain but we must cover at least 3, so we have 3 already.
+
+   We'll assign the remaining 4 to cover the other domains and the horizon variations.
+
+   We have to vary candidate_horizon_hint: 5, 20, 60. We'll assign:
+
+        H_001: 20 (since the target is 20-day, but note: the horizon hint is for the mechanism, and the target is 20-day, so 20 is natural for most)
+        H_002: 5 (for a short-term signal)
+        H_003: 60 (for a longer-term signal)
+        H_004: 20 (regime-conditional might be for the same horizon)
+
+        Then for the rest, we'll assign 5, 20, 60 as needed to have a mix.
+
+   But note: the target panel is 20-day, so the horizon hint for the mechanism might be 20, but we can have hints for 5 or 60 as well.
+
+   We'll assign:
+
+        H_001: 20
+        H_002: 5
+        H_003: 60
+        H_004: 20
+        H_005: 5
+        H_006: 60
+        H_007: 20
+        H_008: 5
+
+   Now, let's create each hypothesis.
+
+   Important: We must use the exact series IDs from the catalog.
+
+   We have the latest macro snapshot (as of 2022-11-15) for the evidence:
+
+        CPIAUCSL: 244.158 (t-1mo)
+        FEDFUNDS: 0.9 (t-1mo)
+        GDPC1: 16842.4 (t-4mo)
+        HOUST: 1215.0 (t-2mo)
+        INDPRO: 104.0998 (t-2mo)
+        PAYEMS: 146063.0 (t-1mo)
+        RSAFS: 474948.0 (t-1mo)
+        UNRATE: 4.4 (t-1mo)
+
+   We'll base our hypotheses on the typical economic relationships.
+
+   Let's create:
+
+   H_001: Always-on trend signal (monetary domain)
+        Mechanism: A low federal funds rate (FEDFUNDS) is associated with positive equity returns because it reduces the cost of capital.
+        Direction: "+"
+        candidate_proxies: ["FEDFUNDS"]
+        candidate_horizon_hint: 20
+        candidate_trigger: "none"
+        candidate_interactions: false
+        evidence_refs: ["series:FEDFUNDS"]   (we have the value 0.9, which is low)
+        regime_hint: "monetary easing cycle"   (but note: we are in a low rate environment, so this is active)
+        failure_condition: "SPX 20-day returns are negative in more than 60% of periods when FEDFUNDS is below 1.0%."
+
+   H_002: Threshold-triggered signal (labor domain)
+        Mechanism: A rising unemployment rate (UNRATE) above 4.5% signals economic weakness, leading to negative equity returns as investors anticipate lower corporate earnings.
+        Direction: "-"
+        candidate_proxies: ["UNRATE"]
+        candidate_horizon_hint: 5
+        candidate_trigger: "UNRATE rises > 0.1pp in 1 month"   (we have UNRATE=4.4, so if it rises above 4.5, that's the trigger)
+        candidate_interactions: false
+        evidence_refs: ["series:UNRATE"]
+        regime_hint: "labor market deterioration"
+        failure_condition: "SPX 5-day returns are positive in more than 60% of instances when UNRATE rises above 4.5% within a month."
+
+   H_003: Interaction-driven signal (demand domain, using two proxies: HOUST and RSAFS)
+        Mechanism: A simultaneous decline in housing starts (HOUST) and retail sales (RSAFS) indicates a weakening consumer demand, which leads to negative equity returns.
+        Direction: "-"
+        candidate_proxies: ["HOUST", "RSAFS"]   (order: HOUST first, then RSAFS? but note: the mechanism is joint, so order doesn't matter for the signal, but we list them as they are used in the interaction)
+        candidate_horizon_hint: 60
+        candidate_trigger: "none"   (but note: we are using an interaction, so we don't have a threshold for a single series, but the interaction is always-on? However, the requirement for interaction-driven is candidate_interactions=true, and we don't require a trigger. But note: the mechanism might be active only when both are declining. However, the trigger field is for a condition that activates the signal. We can set candidate_trigger to "none" for an interaction-driven signal? But note: the requirement says "interaction-driven signal" and we are using two series. We can set candidate_trigger to "none" because the interaction is the signal. However, the problem says: "Threshold-triggered signal" is one type and "Interaction-driven" is another. So for interaction-driven, we don't have a threshold trigger, we have the interaction as the signal. So candidate_trigger can be "none". But note: the requirement for interaction-driven is candidate_interactions=true, and we don't require a trigger. So we set candidate_trigger to "none".)
+        candidate_interactions: true
+        evidence_refs: ["series:HOUST", "series:RSAFS"]
+        regime_hint: "demand contraction"
+        failure_condition: "The joint decline in HOUST and RSAFS (both down > 1% in 1 month) is followed by positive SPX 60-day returns in more than 60% of cases."
+
+   H_004: Regime-conditional signal (supply domain)
+        Mechanism: In a period of high industrial production growth (INDPRO > 105.0), supply chain bottlenecks ease, leading to positive equity returns as corporate margins improve.
+        Direction: "+"
+        candidate_proxies: ["INDPRO"]
+        candidate_horizon_hint: 20
+        candidate_trigger: "none"   (but note: we are using a regime condition, so we set candidate_trigger to the regime condition? Actually, the regime_hint is for the regime, and the trigger is for the signal activation. However, the requirement for regime-conditional is that the regime_hint is specific. We can set candidate_trigger to "none" and rely on regime_hint to specify the condition. But note: the candidate_trigger field is for the activation condition. For a regime-conditional signal, the activation condition is the regime. So we can set candidate_trigger to the regime condition? However, the example in the schema says: "candidate_trigger: 'none' if the mechanism is always-on". For regime-conditional, we don't set candidate_trigger to "none", we set it to the regime condition? But note: the requirement says "regime-conditional signal (regime_hint is specific, not 'any regime')". The candidate_trigger is for the signal activation condition (which might be the regime). So we can set candidate_trigger to the regime condition.
+
+        However, note: the problem says "regime_hint" is the description of the regime. The candidate_trigger is the condition that must be met for the signal to be active. So for a regime-conditional signal, the candidate_trigger should be the regime condition.
+
+        Example: candidate_trigger: "INDPRO > 105.0"
+
+        But note: the mechanism is: "In a period of high industrial production growth (INDPRO > 105.0), ...". So the trigger is INDPRO > 105.0.
+
+        So:
+          candidate_trigger: "INDPRO > 105.0"
+          candidate_interactions: false   (because it's a single series)
+
+        However, note: the requirement for regime-conditional is that the regime_hint is specific. We'll set regime_hint to "high industrial production growth".
+
+        But note: the problem says "regime_hint" is the description of the macro regime. So we set:
+          regime_hint: "high industrial production growth"
+
+        And candidate_trigger: "INDPRO > 105.0"
+
+        However, note: the target horizon is 20 days, and we are using INDPRO (which is monthly, and the latest is t-2mo, so we have the value 104.0998, which is below 105). But the hypothesis is about when it is above 105.
+
+        So:
+          candidate_proxies: ["INDPRO"]
+          candidate_horizon_hint: 20
+          candidate_trigger: "INDPRO > 105.0"
+          candidate_interactions: false
+          evidence_refs: ["series:INDPRO"]
+          failure_condition: "SPX 20-day returns are negative in more than 60% of periods when INDPRO > 105.0."
+
+   Now, we need 4 more.
+
+   H_005: Always-on trend signal (labor domain) - but note: we already have one always-on (H_001) and we need at least one always-on. We have H_001 as monetary. We can have another always-on in labor? But we have to cover at least 3 domains, and we have monetary, labor, demand, supply. We can have another always-on.
+
+        However, note: we already have one always-on (H_001). We don't need to have more than one always-on, but we can. We'll do one more in demand.
+
+        H_005: Always-on trend signal (demand domain)
+          Mechanism: A rising retail sales (RSAFS) indicates strong consumer spending, which supports corporate earnings and leads to positive equity returns.
+          Direction: "+"
+          candidate_proxies: ["RSAFS"]
+          candidate_horizon_hint: 5
+          candidate_trigger: "none"
+          candidate_interactions: false
+          evidence_refs: ["series:RSAFS"]
+          regime_hint: "strong consumer demand"
+          failure_condition: "SPX 5-day returns are negative in more than 60% of periods when RSAFS is rising."
+
+   H_006: Threshold-triggered signal (monetary domain) - we have H_001 as always-on, so we can have a threshold-triggered in monetary.
+
+        Mechanism: A sharp increase in the CPI (CPIAUCSL) above 245.0 signals accelerating inflation, which leads to negative equity returns as the Fed is expected to tighten.
+        Direction: "-"
+        candidate_proxies: ["CPIAUCSL"]
+        candidate_horizon_hint: 60
+        candidate_trigger: "CPIAUCSL > 245.0"
+        candidate_interactions: false
+        evidence_refs: ["series:CPIAUCSL"]
+        regime_hint: "high inflation"
+        failure_condition: "SPX 60-day returns are positive in more than 60% of instances when CPIAUCSL > 245.0."
+
+   H_007: Interaction-driven signal (monetary and labor) - we have one interaction (H_003) but we can have another. We'll do one with FEDFUNDS and UNRATE.
+
+        Mechanism: A combination of high unemployment (UNRATE > 4.5%) and low interest rates (FEDFUNDS < 1.0%) signals a recessionary environment with monetary stimulus, which leads to negative equity returns as the market prices in a downturn.
+        Direction: "-"
+        candidate_proxies: ["UNRATE", "FEDFUNDS"]
+        candidate_horizon_hint: 20
+        candidate_trigger: "none"   (because the interaction is the signal, and we don't have a threshold for the interaction? But note: the interaction is defined by the two series being in a certain state. We can set candidate_trigger to "none" and the interaction condition is the joint state. However, the requirement for interaction-driven is candidate_interactions=true, and we don't require a trigger. But note: the mechanism is active only when both conditions are met. So we can set candidate_trigger to "none" and the failure condition will specify the joint condition. Alternatively, we could set candidate_trigger to "UNRATE > 4.5% AND FEDFUNDS < 1.0%", but the problem says candidate_trigger is for the activation condition. However, the problem states that for interaction-driven, we set candidate_interactions=true and we don't require a trigger. So we'll set candidate_trigger to "none" and the interaction condition is the joint state (which is captured by the two series). But note: the failure condition must specify the joint condition.
+
+        However, the problem says: "candidate_trigger: 'none' if the mechanism is always-on". For an interaction-driven signal, it's not always-on, but the trigger is the joint condition. But the problem doesn't specify that we must put the joint condition in candidate_trigger. It says: "candidate_trigger: ... if the mechanism is always-on". So for non-always-on, we put the condition. But for interaction-driven, the condition is the joint state. So we can put the joint condition in candidate_trigger? However, the problem says "candidate_trigger" is a string that describes the threshold or regime condition. We can write: "UNRATE > 4.5% AND FEDFUNDS < 1.0%".
+
+        Let's do that to be clear.
+
+        candidate_trigger: "UNRATE > 4.5% AND FEDFUNDS < 1.0%"
+
+        But note: the problem says "Threshold-triggered signal" is a separate type. We are making this an interaction-driven signal, so we set candidate_interactions=true and candidate_trigger to the condition.
+
+        So:
+          candidate_trigger: "UNRATE > 4.5% AND FEDFUNDS < 1.0%"
+          candidate_interactions: true
+
+        However, note: the problem says "Threshold-triggered signal" is one type and "Interaction-driven" is another. We are using the interaction-driven type, so we are allowed to have a trigger condition that is a combination? But the problem says for interaction-driven, we set candidate_interactions=true and we don't require a trigger to be set to "none". We can set a trigger condition.
+
+        So we'll set candidate_trigger to the condition that activates the interaction.
+
+        But note: the requirement for interaction-driven is that it requires the joint behavior. So the trigger condition is the joint condition.
+
+        So we'll set candidate_trigger to the joint condition.
+
+        However, the problem says: "candidate_trigger: ... if the mechanism is always-on". For non-always-on, we set the condition. So for this, we set the condition.
+
+        So:
+          candidate_trigger: "UNRATE > 4.5% AND FEDFUNDS < 1.0%"
+
+        But note: the problem says "Threshold-triggered signal" is a separate type. We are not using that type for this one, we are using the interaction-driven type. So it's okay.
+
+        Now, let's write:
+
+          Mechanism: A combination of high unemployment (UNRATE > 4.5%) and low interest rates (FEDFUNDS < 1.0%) signals a recessionary environment with monetary stimulus, which leads to negative equity returns as the market prices in a downturn.
+          Direction: "-"
+          candidate_proxies: ["UNRATE", "FEDFUNDS"]
+          candidate_horizon_hint: 20
+          candidate_trigger: "UNRATE > 4.5% AND FEDFUNDS < 1.0%"
+          candidate_interactions: true
+          evidence_refs: ["series:UNRATE", "series:FEDFUNDS"]
+          regime_hint: "recessionary monetary policy"
+          failure_condition: "SPX 20-day returns are positive in more than 60% of instances when UNRATE > 4.5% AND FEDFUNDS < 1.0%."
+
+   H_008: Regime-conditional signal (demand domain) - we have H_004 as supply, H_003 as demand (interaction), so we can do another regime-conditional in demand.
+
+        Mechanism: In a period of strong housing starts (HOUST > 1200.0), the housing sector is booming, which supports consumer spending and leads to positive equity returns.
+        Direction: "+"
+        candidate_proxies: ["HOUST"]
+        candidate_horizon_hint: 5
+        candidate_trigger: "HOUST > 1200.0"
+        candidate_interactions: false
+        evidence_refs: ["series:HOUST"]
+        regime_hint: "strong housing market"
+        failure_condition: "SPX 5-day returns are negative in more than 60% of periods when HOUST > 1200.0."
+
+   Now, let's check the domains:
+
+        H_001: monetary
+        H_002: labor
+        H_003: demand
+        H_004: supply
+        H_005: demand
+        H_006: monetary
+        H_007: labor (but note: we have two labor? Actually, H_002 and H_007 are both labor, but that's okay as long as we have at least 3 domains. We have monetary, labor, demand, supply -> 4 domains, which is more than 3.)
+
+        We have:
+          monetary: H_001, H_006
+          labor: H_002, H_007
+          demand: H_003, H_005
+          supply: H_004
+
+        So we have 4 domains, which is fine.
+
+   Now, let's write the JSON.
+
+   Important: We must use the exact series IDs.
+
+   We'll write each hypothesis with the required fields.
+
+   Note: For H_003 (interaction-driven in demand), we set candidate_trigger to "none" because we are using the interaction as the signal and the condition is the joint state (which is captured by the two series). However, note: the problem says for interaction-driven, we set candidate_interactions=true, and we don't require a trigger. But the problem also says that the candidate_trigger is for the activation condition. We are activating the signal when both series are declining. So we could set candidate_trigger to "HOUST < 1200.0 AND RSAFS < 470000.0" (using the latest values as reference, but note: the trigger condition is a threshold, not the current value). However, the problem does not require the trigger condition to be based on the current value, but a general threshold.
+
+   But note: the problem says "candidate_trigger: ... threshold or regime condition". We can set a general threshold. However, for H_003, we don't have a specific threshold in the narrative? We said "simultaneous decline", so we need to define what decline means. We'll set a threshold: e.g., both down by more than 1% in the last month.
+
+   However, to keep it simple and avoid making up numbers, we'll set candidate_trigger to "none" for H_003 and let the failure condition specify the condition.
+
+   But note: the problem says for interaction-driven, we set candidate_interactions=true, and we don't require a trigger. So we set candidate_trigger to "none".
+
+   Similarly, for H_007, we set candidate_trigger to the joint condition.
+
+   Let's write the 8 hypotheses.
+
+   We'll assign:
+
+     H_001: monetary, always-on
+     H_002: labor, threshold-triggered
+     H_003: demand, interaction-driven (trigger: none)
+     H_004: supply, regime-conditional (with trigger condition)
+     H_005: demand, always-on
+     H_006: monetary, threshold-triggered
+     H_007: labor, interaction-driven (with trigger condition)
+     H_008: demand, regime-conditional
+
+   Now, write each one.
+
+   Note: The failure_condition must be specific and falsifiable.
+
+   Let's write the JSON array.
+
+   Important: The candidate_proxies must be an array of strings (the exact series IDs).
+
+   We'll write:
+
+   [
+     {
+        "hypothesis_id": "H_001",
+        "dominant_domain": "monetary",
+        "mechanism_narrative": "A low federal funds rate (FEDFUNDS) compresses the discount rate applied to equity cash flows, generating positive S&P 500 forward returns over the next 20 trading days as the cost of capital decreases.",
+        "direction": "+",
+        "candidate_proxies": ["FEDFUNDS"],
+        "candidate_horizon_hint": 20,
+        "candidate_trigger": "none",
+        "candidate_interactions": false,
+        "evidence_refs": ["series:FEDFUNDS"],
+        "regime_hint": "monetary easing cycle",
+        "failure_condition": "SPX 20-day returns are negative in more than 60% of periods when FEDFUNDS is below 1.0%."
+     },
+     ... and so on.
+
+   Let's write all 8.
+
+   Note: For H_003, we set candidate_trigger to "none", and the mechanism_narrative says "simultaneous decline", so the failure_condition will specify the decline condition.
+
+   For H_007, we set candidate_trigger to "UNRATE > 4.5% AND FEDFUNDS < 1.0%".
+
+   Now, we write the JSON.
+
+   We must be careful with the string lengths and the exact wording.
+
+   Let's create the array.
+</think>
+
+[
+  {
+    "hypothesis_id": "H_001",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "A sustained federal funds rate below 1.0% compresses equity discount rates, reducing the present value of future cash flows and generating positive S&P 500 forward returns over the next 20 trading days.",
+    "direction": "+",
+    "candidate_proxies": [
+      "FEDFUNDS"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:FEDFUNDS"
+    ],
+    "regime_hint": "monetary easing cycle",
+    "failure_condition": "SPX 20-day returns are negative in more than 60% of periods when FEDFUNDS remains below 1.0%."
+  },
+  {
+    "hypothesis_id": "H_002",
+    "dominant_domain": "labor",
+    "mechanism_narrative": "A monthly unemployment rate increase exceeding 0.3 percentage points signals deteriorating labor market conditions, reducing consumer spending and corporate earnings growth, which drives negative S&P 500 returns over the next 5 trading days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "UNRATE"
+    ],
+    "candidate_horizon_hint": 5,
+    "candidate_trigger": "UNRATE rises > 0.3pp in 1 month",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:UNRATE"
+    ],
+    "regime_hint": "labor market deterioration",
+    "failure_condition": "SPX 5-day returns are positive in more than 60% of instances when UNRATE rises > 0.3pp in 1 month."
+  },
+  {
+    "hypothesis_id": "H_003",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "Simultaneous declines in housing starts (HOUST) and retail sales (RSAFS) indicate weakening consumer demand, triggering negative S&P 500 returns over the next 60 trading days as corporate revenue expectations decline.",
+    "direction": "-",
+    "candidate_proxies": [
+      "HOUST",
+      "RSAFS"
+    ],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "none",
+    "candidate_interactions": true,
+    "evidence_refs": [
+      "series:HOUST",
+      "series:RSAFS"
+    ],
+    "regime_hint": "demand contraction",
+    "failure_condition": "The joint decline in HOUST and RSAFS (both down > 1% in 1 month) is followed by positive SPX 60-day returns in more than 60% of cases."
+  },
+  {
+    "hypothesis_id": "H_004",
+    "dominant_domain": "supply",
+    "mechanism_narrative": "High industrial production growth (INDPRO > 105.0) indicates easing supply chain constraints, improving corporate margins and generating positive S&P 500 returns over the next 20 trading days.",
+    "direction": "+",
+    "candidate_proxies": [
+      "INDPRO"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "INDPRO > 105.0",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:INDPRO"
+    ],
+    "regime_hint": "supply chain normalization",
+    "failure_condition": "SPX 20-day returns are negative in more than 60% of periods when INDPRO > 105.0."
+  },
+  {
+    "hypothesis_id": "H_005",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "A rising retail sales series (RSAFS) indicates strong consumer spending, supporting corporate revenue growth and generating positive S&P 500 forward returns over the next 5 trading days.",
+    "direction": "+",
+    "candidate_proxies": [
+      "RSAFS"
+    ],
+    "candidate_horizon_hint": 5,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:RSAFS"
+    ],
+    "regime_hint": "strong consumer demand",
+    "failure_condition": "SPX 5-day returns are negative in more than 60% of periods when RSAFS is rising."
+  },
+  {
+    "hypothesis_id": "H_006",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "Accelerating inflation (CPIAUCSL > 245.0) signals potential Fed tightening, increasing equity discount rates and driving negative S&P 500 returns over the next 60 trading days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "CPIAUCSL"
+    ],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "CPIAUCSL > 245.0",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:CPIAUCSL"
+    ],
+    "regime_hint": "high inflation",
+    "failure_condition": "SPX 60-day returns are positive in more than 60% of instances when CPIAUCSL > 245.0."
+  },
+  {
+    "hypothesis_id": "H_007",
+    "dominant_domain": "labor",
+    "mechanism_narrative": "A combination of high unemployment (UNRATE > 4.5%) and low interest rates (FEDFUNDS < 1.0%) signals recessionary pressures with monetary stimulus, generating negative S&P 500 returns over the next 20 trading days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "UNRATE",
+      "FEDFUNDS"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "UNRATE > 4.5% AND FEDFUNDS < 1.0%",
+    "candidate_interactions": true,
+    "evidence_refs": [
+      "series:UNRATE",
+      "series:FEDFUNDS"
+    ],
+    "regime_hint": "recessionary monetary policy",
+    "failure_condition": "SPX 20-day returns are positive in more than 60% of instances when UNRATE > 4.5% AND FEDFUNDS < 1.0%."
+  },
+  {
+    "hypothesis_id": "H_008",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "Strong housing market activity (HOUST > 1200.0) indicates robust consumer spending, supporting corporate earnings and generating positive S&P 500 returns over the next 5 trading days.",
+    "direction": "+",
+    "candidate_proxies": [
+      "HOUST"
+    ],
+    "candidate_horizon_hint": 5,
+    "candidate_trigger": "HOUST > 1200.0",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:HOUST"
+    ],
+    "regime_hint": "housing market boom",
+    "failure_condition": "SPX 5-day returns are negative in more than 60% of periods when HOUST > 1200.0."
+  }
+]

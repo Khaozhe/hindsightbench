@@ -1,0 +1,369 @@
+We are generating 8 hypotheses for the S&P 500 forward 20-day returns as of 2008-09-15.
+ The decision time point is 2008-09-15, so we can only use data available on or before that date.
+
+ Observable catalog (series IDs) we can use: GDPC1, CPIAUCSL, PAYEMS, INDPRO, RSAFS, UNRATE, HOUST, FEDFUNDS.
+
+ We must cover at least 3 different dominant_domains (demand, supply, monetary, labor) across the 8 sketches.
+
+ We must include at least one of each mechanism type:
+   - Always-on trend signal (candidate_trigger = "none", candidate_interactions = false)
+   - Threshold-triggered signal (candidate_trigger describes a crossing condition)
+   - Interaction-driven signal (candidate_interactions = true, >= 2 proxies)
+   - Regime-conditional signal (regime_hint is specific, not "any regime")
+
+ We must vary candidate_horizon_hint (5, 20, 60) across the hypotheses.
+
+ We are to output exactly 8 hypotheses in a JSON array.
+
+ Let's plan:
+
+ 1. Always-on trend signal (1 hypothesis): candidate_trigger = "none", candidate_interactions = false.
+    Example: using a single series that is always a trend indicator.
+
+ 2. Threshold-triggered signal (1 hypothesis): candidate_trigger describes a condition (e.g., a series crosses a threshold).
+
+ 3. Interaction-driven signal (1 hypothesis): candidate_interactions = true, with at least 2 proxies.
+
+ 4. Regime-conditional signal (1 hypothesis): regime_hint is specific (e.g., "monetary tightening cycle", not "any regime").
+
+ 5. Then we have 4 more to fill, making sure we cover at least 3 domains and vary horizons.
+
+ We have to assign 8 hypotheses (H_001 to H_008).
+
+ Let's assign:
+
+ H_001: Always-on trend signal (monetary domain, using FEDFUNDS as a proxy for interest rate trend)
+   - dominant_domain: "monetary"
+   - mechanism_narrative: "A declining federal funds rate over the past 6 months indicates an accommodative monetary policy stance, which reduces the discount rate for equity valuation and leads to positive S&P 500 returns over the next 20 trading days."
+   - direction: "+" (because lower rates are bullish for equities)
+   - candidate_proxies: ["FEDFUNDS"] (only one, so candidate_interactions=false)
+   - candidate_horizon_hint: 20 (since the target is 20-day, and we are using a 6-month prior for the trend)
+   - candidate_trigger: "none"
+   - candidate_interactions: false
+   - evidence_refs: ["series:FEDFUNDS"] (we have the value at t-1mo: 4.48, but we are looking at the trend over 6 months? Actually, we have GDPC1 at t-6mo, but for FEDFUNDS we have the value at t-1mo. However, for a trend we need to see the change. But note: the prompt says "only information available on or before this date", so we can use the value at t-1mo and compare to a prior. However, the hypothesis is about a sustained decline, so we need to know the trend. But the evidence_refs can just point to the series. We'll assume the model has the history to see the trend.)
+
+ H_002: Threshold-triggered signal (labor domain, using UNRATE as a threshold)
+   - dominant_domain: "labor"
+   - mechanism_narrative: "When the unemployment rate rises above 4.5% in a 3-month window, it signals deteriorating labor market conditions that reduce consumer spending and corporate earnings growth, leading to negative S&P 500 returns over the next 5 trading days."
+   - direction: "-"
+   - candidate_proxies: ["UNRATE"]
+   - candidate_horizon_hint: 5 (short horizon)
+   - candidate_trigger: "UNRATE > 4.5%"
+   - candidate_interactions: false
+   - evidence_refs: ["series:UNRATE", "fact:current UNRATE=4.1 (below threshold)"] -> but note: the current UNRATE is 4.1, so it's below. However, the hypothesis is about when it rises above. We are not triggering now, but the condition is the threshold. The evidence_refs can be the series and the current value to show it's below, but the trigger condition is when it exceeds 4.5. So we can have evidence_refs: ["series:UNRATE", "fact:current UNRATE=4.1"]
+   - regime_hint: "labor market deterioration"
+   - failure_condition: "SPX produces positive 5-day returns in > 60% of instances where UNRATE exceeds 4.5%."
+
+ H_003: Interaction-driven signal (demand and supply domains, using two series that interact)
+   - dominant_domain: "demand" (but note: we have two series from different domains? We can assign the dominant domain as the primary one, but the interaction might be between two. However, the dominant_domain field is for the primary domain of the mechanism. We'll choose "demand" as the primary because the interaction is about demand conditions.)
+   - mechanism_narrative: "A simultaneous decline in industrial production (INDPRO) and housing starts (HOUST) indicates a contraction in the real economy, which triggers a negative feedback loop of reduced consumer confidence and corporate profit expectations, leading to negative S&P 500 returns over the next 20 trading days."
+   - direction: "-"
+   - candidate_proxies: ["INDPRO", "HOUST"] (two series, so candidate_interactions=true)
+   - candidate_horizon_hint: 20
+   - candidate_trigger: "INDPRO < 100 and HOUST < 1300" (we have HOUST at 1289, so 1300 is a threshold; INDPRO at 101.96, so below 100 would be a decline? But note: INDPRO is an index with 2017=100, so 100 is the base. We are looking for a decline from the base? Actually, the value is 101.96, so a decline would be below 100. But the current value is 101.96, so we are not below. However, the trigger condition is when both are below thresholds. We set thresholds: INDPRO < 100 and HOUST < 1300. The current HOUST is 1289, which is below 1300, but INDPRO is 101.96 which is above 100. So the trigger condition is not met now, but the hypothesis is about when it is met.)
+   - candidate_interactions: true
+   - evidence_refs: ["series:INDPRO", "series:HOUST", "fact:current INDPRO=101.96, HOUST=1289"]
+   - regime_hint: "economic contraction"
+   - failure_condition: "SPX produces positive 20-day returns in > 60% of instances where both INDPRO < 100 and HOUST < 1300."
+
+ H_004: Regime-conditional signal (monetary domain, specific regime: "monetary tightening cycle")
+   - dominant_domain: "monetary"
+   - mechanism_narrative: "During a monetary tightening cycle, characterized by rising FEDFUNDS and declining CPIAUCSL, the increased cost of capital and reduced inflation expectations lead to negative S&P 500 returns over the next 60 trading days."
+   - direction: "-"
+   - candidate_proxies: ["FEDFUNDS", "CPIAUCSL"] (two series, so candidate_interactions=true? But note: the mechanism is about the joint behavior, so we set candidate_interactions=true. However, the dominant_domain is monetary, and we are using two monetary series. But note: CPIAUCSL is a monetary series? Actually, CPI is in the monetary domain per the catalog. So we have two monetary series. But the interaction is between them: rising FEDFUNDS and declining CPIAUCSL. So candidate_interactions=true.
+   - candidate_horizon_hint: 60
+   - candidate_trigger: "FEDFUNDS > 4.0% and CPIAUCSL < 315" (we have CPIAUCSL at 317.685, so 315 is a threshold; FEDFUNDS at 4.48, so above 4.0. But note: the current CPIAUCSL is 317.685, which is above 315, so the condition CPIAUCSL < 315 is not met. However, the trigger condition is when both are met: FEDFUNDS>4.0 and CPIAUCSL<315. So we are not triggering now, but the hypothesis is for when it is triggered.)
+   - candidate_interactions: true
+   - evidence_refs: ["series:FEDFUNDS", "series:CPIAUCSL", "fact:current FEDFUNDS=4.48, CPIAUCSL=317.685"]
+   - regime_hint: "monetary tightening cycle"
+   - failure_condition: "SPX produces positive 60-day returns in > 60% of instances during the trigger condition."
+
+ H_005: Always-on trend signal (but in a different domain: demand, using GDP growth)
+   - dominant_domain: "demand"
+   - mechanism_narrative: "A sustained increase in real GDP growth (GDPC1) over the past 6 months signals strong economic expansion, which supports corporate earnings and drives positive S&P 500 returns over the next 20 trading days."
+   - direction: "+"
+   - candidate_proxies: ["GDPC1"] (one series, so candidate_interactions=false)
+   - candidate_horizon_hint: 20
+   - candidate_trigger: "none"
+   - candidate_interactions: false
+   - evidence_refs: ["series:GDPC1", "fact:current GDPC1 (t-6mo)=23400.294"]
+   - regime_hint: "strong economic expansion"
+   - failure_condition: "Walk-forward Rank IC remains below 0.03 over any 2-year rolling window, or 20-day forward returns in expansion periods are not significantly higher than baseline."
+
+ H_006: Threshold-triggered signal (supply domain, using INDPRO)
+   - dominant_domain: "supply"
+   - mechanism_narrative: "When industrial production (INDPRO) falls below 100 for two consecutive months, it indicates a manufacturing slowdown that reduces corporate output and profit margins, leading to negative S&P 500 returns over the next 5 trading days."
+   - direction: "-"
+   - candidate_proxies: ["INDPRO"]
+   - candidate_horizon_hint: 5
+   - candidate_trigger: "INDPRO < 100"
+   - candidate_interactions: false
+   - evidence_refs: ["series:INDPRO", "fact:current INDPRO=101.96 (above threshold)"]
+   - regime_hint: "manufacturing slowdown"
+   - failure_condition: "SPX produces positive 5-day returns in > 60% of instances where INDPRO < 100."
+
+ H_007: Interaction-driven signal (labor and demand, using two series)
+   - dominant_domain: "labor" (primary domain for the mechanism, but note: PAYEMS is labor, and HOUST is demand. However, the interaction is between labor and demand. We'll assign dominant_domain as "labor" because the labor series is the first in the interaction? But the mechanism narrative should be about the interaction. Alternatively, we can assign to "demand" because the housing starts (HOUST) is a demand indicator. However, the catalog says HOUST is in "demand" domain. So we have two domains. But the dominant_domain field must be one of the four. We'll choose "demand" as the primary because the housing starts is a key demand indicator for the economy. But note: the mechanism is about the interaction of labor (PAYEMS) and demand (HOUST). However, the dominant_domain for the hypothesis is the primary domain we are focusing on. Let's choose "demand" because the housing starts (HOUST) is a demand series and the interaction is about the demand side of the economy. Alternatively, we can choose "labor" because the labor market (PAYEMS) is the other. But the problem says "dominant_domain" is the primary macro domain. We'll go with "demand" for this one to have variety.
+
+   Actually, let's reassign to avoid confusion: we'll set dominant_domain to "demand" for this one.
+
+   - dominant_domain: "demand"
+   - mechanism_narrative: "A simultaneous decline in labor force participation (PAYEMS) and housing starts (HOUST) indicates a weakening consumer demand and reduced economic activity, which triggers negative S&P 500 returns over the next 20 trading days."
+   - direction: "-"
+   - candidate_proxies: ["PAYEMS", "HOUST"]
+   - candidate_horizon_hint: 20
+   - candidate_trigger: "PAYEMS < 159000 and HOUST < 1300" (current PAYEMS=159536, so 159000 is a threshold; HOUST=1289, so below 1300. But note: the current PAYEMS is 159536, which is above 159000, so the trigger condition is not met. We are setting the condition for when it is triggered.)
+   - candidate_interactions: true
+   - evidence_refs: ["series:PAYEMS", "series:HOUST", "fact:current PAYEMS=159536, HOUST=1289"]
+   - regime_hint: "weak consumer demand"
+   - failure_condition: "SPX produces positive 20-day returns in > 60% of instances where both PAYEMS < 159000 and HOUST < 1300."
+
+ H_008: Regime-conditional signal (in the same domain as H_004, but different regime) - but we need to cover at least 3 domains. We have already covered monetary, labor, demand, and supply. We have 4 domains. We can do one more in supply.
+
+   Let's do a supply domain regime-conditional signal.
+
+   - dominant_domain: "supply"
+   - mechanism_narrative: "During a supply shock event, characterized by a sharp drop in industrial production (INDPRO) below 100 and a rise in the unemployment rate (UNRATE) above 4.0%, the economy experiences a contraction in output and increased joblessness, leading to negative S&P 500 returns over the next 60 trading days."
+   - direction: "-"
+   - candidate_proxies: ["INDPRO", "UNRATE"]
+   - candidate_horizon_hint: 60
+   - candidate_trigger: "INDPRO < 100 and UNRATE > 4.0%"
+   - candidate_interactions: true (because two series)
+   - evidence_refs: ["series:INDPRO", "series:UNRATE", "fact:current INDPRO=101.96, UNRATE=4.1"]
+   - regime_hint: "supply shock"
+   - failure_condition: "SPX produces positive 60-day returns in > 60% of instances during the trigger condition."
+
+ Now, let's check the requirements:
+
+  - We have 8 hypotheses.
+
+  - Domains covered:
+        H_001: monetary
+        H_002: labor
+        H_003: demand
+        H_004: monetary
+        H_005: demand
+        H_006: supply
+        H_007: demand
+        H_008: supply
+
+    So we have at least 3 domains (we have 4: monetary, labor, demand, supply).
+
+  - Mechanism types:
+        Always-on: H_001, H_005 -> two of them (we need at least one, so we have two)
+        Threshold-triggered: H_002, H_006 -> two of them (we need at least one)
+        Interaction-driven: H_003, H_004, H_007, H_008 -> four of them (we need at least one)
+        Regime-conditional: H_004, H_008 (and also H_001, H_005, H_002, H_006 are not regime-conditional? Actually, H_004 and H_008 have specific regime_hint, so they are regime-conditional. H_001 and H_005 are always-on, so they are not regime-conditional. H_002 and H_006 are threshold-triggered, not necessarily regime-conditional. But note: the requirement says "at least 1 sketch per mechanism type", meaning we have at least one of each. We have:
+            Always-on: H_001, H_005
+            Threshold-triggered: H_002, H_006
+            Interaction-driven: H_003, H_004, H_007, H_008
+            Regime-conditional: H_004, H_008 (and note: H_004 and H_008 are also interaction-driven, but they are also regime-conditional. The requirement for regime-conditional is that the regime_hint is specific. So we have at least one regime-conditional: H_004 and H_008.)
+
+  - Horizon hints: we have 5, 20, 60. We have:
+        H_001: 20
+        H_002: 5
+        H_003: 20
+        H_004: 60
+        H_005: 20
+        H_006: 5
+        H_007: 20
+        H_008: 60
+
+    So we have 5, 20, 60 covered.
+
+  Now, we must write the JSON array.
+
+  Note: The evidence_refs must be in the format: 'series:<ID>', 'doc:<slug>', or 'fact:<description>'.
+
+  We have to be careful with the current values: we are using the values provided in the prompt.
+
+  Let's write the 8 hypotheses.
+
+  Important: candidate_interactions must be boolean (true/false), not string.
+
+  We'll write the JSON array.
+
+  Note: The example H_000 is just a format reference, so we start at H_001.
+
+  Let's create the array.
+
+  We'll write the 8 objects.
+
+  Note: The failure_condition must be at least 20 characters.
+
+  We'll write each one.
+
+  We have to make sure the mechanism_narrative is between 40 and 400 characters.
+
+  Let's count for H_001:
+
+    "A sustained 3-month decline in the federal funds rate signals an easing monetary cycle that compresses discount rates applied to equity cash flows, producing positive S&P 500 forward returns over the next 20 trading days."
+
+    That's about 150 characters.
+
+  We'll write them.
+
+  Note: The candidate_trigger for H_002: "UNRATE > 4.5%", which is a string.
+
+  We are using the exact series IDs from the catalog.
+
+  Now, the JSON array.
+
+  We must not have any extra text.
+
+  Let's write the JSON.
+</think>
+
+[
+  {
+    "hypothesis_id": "H_001",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "A sustained decline in the federal funds rate over the past 6 months indicates an accommodative monetary policy stance that reduces discount rates for equity valuation, producing positive S&P 500 returns over the next 20 trading days.",
+    "direction": "+",
+    "candidate_proxies": [
+      "FEDFUNDS"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:FEDFUNDS"
+    ],
+    "regime_hint": "monetary easing cycle",
+    "failure_condition": "Walk-forward Rank IC remains below 0.03 over any 2-year rolling window, or 20-day forward returns in easing periods are not significantly higher than baseline (t-test p > 0.05)."
+  },
+  {
+    "hypothesis_id": "H_002",
+    "dominant_domain": "labor",
+    "mechanism_narrative": "When the unemployment rate rises above 4.5% in a 3-month window, it signals deteriorating labor market conditions that reduce consumer spending and corporate earnings growth, leading to negative S&P 500 returns over the next 5 trading days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "UNRATE"
+    ],
+    "candidate_horizon_hint": 5,
+    "candidate_trigger": "UNRATE > 4.5%",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:UNRATE",
+      "fact:current UNRATE=4.1"
+    ],
+    "regime_hint": "labor market deterioration",
+    "failure_condition": "SPX produces positive 5-day returns in > 60% of instances where UNRATE exceeds 4.5%."
+  },
+  {
+    "hypothesis_id": "H_003",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "A simultaneous decline in industrial production (INDPRO) below 100 and housing starts (HOUST) below 1300 indicates contraction in real economic activity, triggering reduced consumer confidence and negative equity returns over 20 days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "INDPRO",
+      "HOUST"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "INDPRO < 100 and HOUST < 1300",
+    "candidate_interactions": true,
+    "evidence_refs": [
+      "series:INDPRO",
+      "series:HOUST",
+      "fact:current INDPRO=101.96, HOUST=1289"
+    ],
+    "regime_hint": "economic contraction",
+    "failure_condition": "SPX produces positive 20-day returns in > 60% of instances where both INDPRO < 100 and HOUST < 1300."
+  },
+  {
+    "hypothesis_id": "H_004",
+    "dominant_domain": "monetary",
+    "mechanism_narrative": "During monetary tightening cycles characterized by rising FEDFUNDS above 4.0% and declining CPIAUCSL below 315, increased capital costs and reduced inflation expectations drive negative S&P 500 returns over 60 days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "FEDFUNDS",
+      "CPIAUCSL"
+    ],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "FEDFUNDS > 4.0% and CPIAUCSL < 315",
+    "candidate_interactions": true,
+    "evidence_refs": [
+      "series:FEDFUNDS",
+      "series:CPIAUCSL",
+      "fact:current FEDFUNDS=4.48, CPIAUCSL=317.685"
+    ],
+    "regime_hint": "monetary tightening cycle",
+    "failure_condition": "SPX produces positive 60-day returns in > 60% of instances during the trigger condition."
+  },
+  {
+    "hypothesis_id": "H_005",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "A sustained increase in real GDP growth (GDPC1) over the past 6 months signals strong economic expansion that supports corporate earnings and drives positive S&P 500 returns over 20 days.",
+    "direction": "+",
+    "candidate_proxies": [
+      "GDPC1"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "none",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:GDPC1",
+      "fact:current GDPC1 (t-6mo)=23400.294"
+    ],
+    "regime_hint": "strong economic expansion",
+    "failure_condition": "Walk-forward Rank IC remains below 0.03 over any 2-year rolling window, or 20-day forward returns in expansion periods are not significantly higher than baseline."
+  },
+  {
+    "hypothesis_id": "H_006",
+    "dominant_domain": "supply",
+    "mechanism_narrative": "When industrial production (INDPRO) falls below 100 for two consecutive months, it indicates manufacturing slowdown that reduces corporate output and profit margins, leading to negative S&P 500 returns over 5 days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "INDPRO"
+    ],
+    "candidate_horizon_hint": 5,
+    "candidate_trigger": "INDPRO < 100",
+    "candidate_interactions": false,
+    "evidence_refs": [
+      "series:INDPRO",
+      "fact:current INDPRO=101.96"
+    ],
+    "regime_hint": "manufacturing slowdown",
+    "failure_condition": "SPX produces positive 5-day returns in > 60% of instances where INDPRO < 100."
+  },
+  {
+    "hypothesis_id": "H_007",
+    "dominant_domain": "demand",
+    "mechanism_narrative": "A simultaneous decline in labor force (PAYEMS) below 159000 and housing starts (HOUST) below 1300 indicates weakening consumer demand and reduced economic activity, triggering negative S&P 500 returns over 20 days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "PAYEMS",
+      "HOUST"
+    ],
+    "candidate_horizon_hint": 20,
+    "candidate_trigger": "PAYEMS < 159000 and HOUST < 1300",
+    "candidate_interactions": true,
+    "evidence_refs": [
+      "series:PAYEMS",
+      "series:HOUST",
+      "fact:current PAYEMS=159536, HOUST=1289"
+    ],
+    "regime_hint": "weak consumer demand",
+    "failure_condition": "SPX produces positive 20-day returns in > 60% of instances where both PAYEMS < 159000 and HOUST < 1300."
+  },
+  {
+    "hypothesis_id": "H_008",
+    "dominant_domain": "supply",
+    "mechanism_narrative": "During supply shock events characterized by INDPRO below 100 and UNRATE above 4.0%, reduced output and increased joblessness lead to negative S&P 500 returns over 60 days.",
+    "direction": "-",
+    "candidate_proxies": [
+      "INDPRO",
+      "UNRATE"
+    ],
+    "candidate_horizon_hint": 60,
+    "candidate_trigger": "INDPRO < 100 and UNRATE > 4.0%",
+    "candidate_interactions": true,
+    "evidence_refs": [
+      "series:INDPRO",
+      "series:UNRATE",
+      "fact:current INDPRO=101.96, UNRATE=4.1"
+    ],
+    "regime_hint": "supply shock",
+    "failure_condition": "SPX produces positive 60-day returns in > 60% of instances during the trigger condition."
+  }
+]
